@@ -7,115 +7,183 @@
     <style>
         * { box-sizing: border-box; }
         body {
-            font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
-            max-width: 900px;
+            font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", "Segoe UI", sans-serif;
+            max-width: 920px;
             margin: 0 auto;
-            padding: 24px;
-            background: #f5f5f7;
-            color: #1d1d1f;
+            padding: 40px 32px;
+            background: #c8e6c9;
+            color: #2e7d32;
             line-height: 1.6;
+            min-height: 100vh;
         }
         h1 {
-            color: #1d1d1f;
-            border-bottom: 3px solid #0071e3;
-            padding-bottom: 12px;
-            font-size: 1.5rem;
+            color: #1b5e20;
+            font-size: 1.85rem;
+            font-weight: 600;
+            letter-spacing: -0.02em;
+            margin: 0 0 6px 0;
+            padding-bottom: 18px;
+            border-bottom: 2px solid transparent;
+            border-image: linear-gradient(90deg, #43a047, #0288d1, #43a047) 1;
         }
-        .subtitle { color: #6e6e73; font-size: 0.9rem; margin-bottom: 24px; }
+        .subtitle {
+            color: #388e3c;
+            font-size: 0.9rem;
+            margin-bottom: 32px;
+            line-height: 1.6;
+        }
         .card {
             background: #fff;
-            border-radius: 12px;
-            padding: 20px;
+            border-radius: 16px;
+            padding: 26px 28px;
             margin-bottom: 20px;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+            border: 1px solid rgba(67,160,71,0.25);
+            box-shadow: 0 2px 12px rgba(67,160,71,0.08);
+            transition: all 0.25s ease;
+        }
+        .card:hover {
+            box-shadow: 0 8px 24px rgba(67,160,71,0.12);
+            border-color: rgba(2,136,209,0.2);
         }
         .card h2 {
             font-size: 1rem;
-            margin: 0 0 14px 0;
-            color: #0071e3;
+            font-weight: 600;
+            margin: 0 0 18px 0;
+            color: #1b5e20;
+            display: flex;
+            align-items: center;
+            gap: 10px;
         }
-        label { display: block; font-weight: 600; margin-bottom: 6px; color: #333; }
-        .hint { font-size: 12px; color: #6e6e73; margin-top: 4px; margin-bottom: 8px; }
+        .card h2::before {
+            content: '';
+            width: 4px;
+            height: 18px;
+            background: linear-gradient(180deg, #43a047, #0288d1);
+            border-radius: 2px;
+        }
+        label { display: block; font-weight: 500; margin-bottom: 6px; color: #2e7d32; font-size: 0.9rem; }
+        .hint { font-size: 12px; color: #558b2f; margin-top: 4px; margin-bottom: 10px; line-height: 1.45; }
         input[type="text"], textarea, select {
             width: 100%;
-            padding: 10px 12px;
-            border: 1px solid #d2d2d7;
-            border-radius: 8px;
+            padding: 12px 16px;
+            border: 1px solid #c8e6c9;
+            border-radius: 10px;
             font-size: 14px;
+            transition: all 0.2s ease;
+            background: #fafafa;
+            color: #1b5e20;
         }
         input:focus, textarea:focus, select:focus {
             outline: none;
-            border-color: #0071e3;
+            border-color: #43a047;
+            box-shadow: 0 0 0 3px rgba(67,160,71,0.15);
+            background: #fff;
         }
-        .row { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px; }
+        input::placeholder, textarea::placeholder { color: #81c784; }
+        select option { background: #fff; color: #1b5e20; }
+        .row { display: grid; grid-template-columns: 1fr 1fr; gap: 22px; margin-bottom: 18px; }
         .row:last-child { margin-bottom: 0; }
         @media (max-width: 600px) { .row { grid-template-columns: 1fr; } }
         .field-row {
             display: flex;
-            gap: 10px;
+            gap: 12px;
             align-items: center;
             margin-bottom: 10px;
+            padding: 10px 0;
+            border-bottom: 1px solid #e8f5e9;
         }
+        .field-row:last-child { border-bottom: none; }
         .field-row input:first-child { flex: 2; min-width: 0; }
-        .field-row select { flex: 1; max-width: 100px; }
+        .field-row select { flex: 1; max-width: 110px; min-height: 44px; }
         .btn {
-            padding: 10px 20px;
+            padding: 11px 22px;
             border: none;
-            border-radius: 8px;
+            border-radius: 10px;
             font-size: 14px;
-            cursor: pointer;
             font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s ease;
         }
-        .btn-primary { background: #0071e3; color: #fff; }
-        .btn-primary:hover { background: #0077ed; }
-        .btn-secondary { background: #e8e8ed; color: #1d1d1f; margin-left: 10px; }
-        .btn-secondary:hover { background: #d2d2d7; }
-        .btn-danger { background: #ff3b30; color: #fff; padding: 6px 12px; font-size: 12px; }
+        .btn-primary {
+            background: linear-gradient(135deg, #43a047 0%, #66bb6a 100%);
+            color: #fff;
+            box-shadow: 0 2px 8px rgba(67,160,71,0.35);
+        }
+        .btn-primary:hover {
+            background: linear-gradient(135deg, #388e3c 0%, #43a047 100%);
+            box-shadow: 0 4px 16px rgba(67,160,71,0.4);
+            transform: translateY(-1px);
+        }
+        .btn-secondary {
+            background: #e3f2fd;
+            color: #0277bd;
+            border: 1px solid #90caf9;
+        }
+        .btn-secondary:hover {
+            background: #bbdefb;
+            color: #01579b;
+        }
+        .btn-danger {
+            background: #ffebee;
+            color: #c62828;
+            border: 1px solid #ef9a9a;
+        }
+        .btn-danger:hover { background: #ffcdd2; }
         .output-block {
-            background: #1d1d1f;
-            color: #e8e8ed;
-            padding: 16px;
-            border-radius: 8px;
-            font-family: "Monaco", "Menlo", monospace;
+            background: linear-gradient(180deg, #263238 0%, #1e272e 100%);
+            color: #a5d6a7;
+            padding: 22px;
+            border-radius: 12px;
+            font-family: "SF Mono", "Monaco", "Menlo", "Consolas", monospace;
             font-size: 12px;
-            line-height: 1.5;
+            line-height: 1.65;
             white-space: pre-wrap;
             word-break: break-all;
-            min-height: 80px;
-            max-height: 350px;
+            min-height: 100px;
+            max-height: 380px;
             overflow-y: auto;
-            margin-top: 12px;
+            margin-top: 16px;
+            border: 1px solid rgba(67,160,71,0.3);
         }
-        .output-block:empty::before { content: '点击上方按钮生成'; color: #6e6e73; }
-        .gen-section { margin-bottom: 24px; padding-bottom: 24px; border-bottom: 1px solid #e5e5ea; }
+        .output-block:empty::before { content: '点击上方按钮生成'; color: #81c784; opacity: 0.8; }
+        .gen-section {
+            margin-bottom: 28px;
+            padding-bottom: 28px;
+            border-bottom: 1px solid #e8f5e9;
+        }
         .gen-section:last-of-type { margin-bottom: 0; padding-bottom: 0; border-bottom: none; }
+        .gen-section h3 { font-size: 0.95rem; margin: 0 0 14px 0; color: #2e7d32; font-weight: 600; }
         .toast {
             position: fixed;
-            bottom: 24px;
-            right: 24px;
-            padding: 12px 20px;
-            border-radius: 8px;
+            bottom: 28px;
+            right: 28px;
+            padding: 14px 24px;
+            border-radius: 12px;
             font-weight: 500;
             z-index: 1000;
+            box-shadow: 0 8px 24px rgba(0,0,0,0.15);
         }
-        .toast.success { background: #34c759; color: #fff; }
-        .toast.error { background: #ff3b30; color: #fff; }
+        .toast.success { background: linear-gradient(135deg, #43a047 0%, #66bb6a 100%); color: #fff; }
+        .toast.error { background: linear-gradient(135deg, #c62828 0%, #e53935 100%); color: #fff; }
+        .required { color: #c62828; font-size: 11px; font-weight: 500; }
+        #batchImportBox { margin-top: 12px; }
+        #batchImportBox textarea { height: 120px; font-family: "SF Mono", Monaco, monospace; font-size: 13px; }
     </style>
 </head>
 <body>
     <h1>表验收自动化代码生成</h1>
-    <p class="subtitle">填写表名、限制条件、字段信息，可分别生成 Python 代码和 SQL 代码。无需安装任何东西，双击本文件用浏览器打开即可使用。</p>
+    <p class="subtitle">填写表名、限制条件、字段信息，可分别生成 Python 代码和 SQL 代码。</p>
 
     <div class="card">
         <h2>1. 表名称</h2>
         <div class="row">
             <div>
-                <label for="oldTable">老表名 <span style="color:#ff3b30;font-size:11px;">必填</span></label>
+                <label for="oldTable">老表名 <span class="required">必填</span></label>
                 <div class="hint">例如：dws_zdm.dws_zdm_hive_trade_order_direct_smzdmid</div>
                 <input type="text" id="oldTable" placeholder="dws_zdm.xxx">
             </div>
             <div>
-                <label for="newTable">新表名 <span style="color:#ff3b30;font-size:11px;">必填</span></label>
+                <label for="newTable">新表名 <span class="required">必填</span></label>
                 <div class="hint">例如：dws_zdm.tmp_dws_zdm_hive_trade_order_direct_smzdmid</div>
                 <input type="text" id="newTable" placeholder="dws_zdm.tmp_xxx">
             </div>
@@ -139,12 +207,12 @@
     </div>
 
     <div class="card">
-        <h2>3. 字段名称与类型 <span style="color:#ff3b30;font-size:11px;">必填</span></h2>
+        <h2>3. 字段名称与类型 <span class="required">必填</span></h2>
         <div class="hint">str=字符串/维度，int/float=数值型。生成代码将实现：①数据条数 ②数值sum ③按str字段group by汇总 ④全str字段full outer join后sum</div>
         <div style="margin-bottom:10px;">
             <button type="button" class="btn btn-secondary" onclick="toggleBatchImport()">批量导入</button>
             <div id="batchImportBox" style="display:none; margin-top:10px;">
-                <textarea id="batchImportText" placeholder="每行一个字段，格式：字段名,类型 或 字段名 类型&#10;例如：order_create_date,str&#10;pro_gmv,float" style="height:120px; font-family:monospace; font-size:13px;"></textarea>
+                <textarea id="batchImportText" placeholder="每行一个字段，格式：字段名,类型 或 字段名 类型&#10;例如：order_create_date,str&#10;pro_gmv,float"></textarea>
                 <div style="margin-top:8px;">
                     <button type="button" class="btn btn-primary" onclick="doBatchImport()">导入并替换</button>
                     <button type="button" class="btn btn-secondary" onclick="doBatchImport(true)">导入并追加</button>
