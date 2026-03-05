@@ -3,101 +3,61 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>表验收工具 - 配置生成器</title>
+    <title>表验收自动化代码生成</title>
     <style>
         * { box-sizing: border-box; }
         body {
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+            font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
             max-width: 900px;
             margin: 0 auto;
             padding: 24px;
-            background: linear-gradient(135deg, #667eea08 0%, #764ba208 50%, #f093fb08 100%);
-            color: #2c3e50;
+            background: #f5f5f7;
+            color: #1d1d1f;
             line-height: 1.6;
         }
         h1 {
-            color: #1a1a2e;
-            background: linear-gradient(90deg, #667eea, #764ba2);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-            background-clip: text;
-            border-bottom: 3px solid #667eea;
+            color: #1d1d1f;
+            border-bottom: 3px solid #0071e3;
             padding-bottom: 12px;
-            font-size: 1.6rem;
-            font-weight: 700;
+            font-size: 1.5rem;
         }
-        h2 {
-            font-size: 1.05rem;
-            margin: 0 0 16px 0;
-            padding: 10px 14px;
-            border-radius: 8px;
-            font-weight: 600;
-        }
+        .subtitle { color: #6e6e73; font-size: 0.9rem; margin-bottom: 24px; }
         .card {
+            background: #fff;
             border-radius: 12px;
             padding: 20px;
-            margin-bottom: 24px;
-            box-shadow: 0 4px 12px rgba(0,0,0,0.08);
-            border-left: 4px solid;
-            transition: box-shadow 0.2s;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.06);
         }
-        .card:hover { box-shadow: 0 6px 20px rgba(0,0,0,0.1); }
-        .card-mod-1 { background: linear-gradient(135deg, #eef2ff 0%, #e0e7ff 100%); border-left-color: #667eea; }
-        .card-mod-1 h2 { background: #667eea; color: white; }
-        .card-mod-2 { background: linear-gradient(135deg, #ccfbf1 0%, #99f6e4 100%); border-left-color: #0d9488; }
-        .card-mod-2 h2 { background: #0d9488; color: white; }
-        .card-mod-3 { background: linear-gradient(135deg, #d1fae5 0%, #a7f3d0 100%); border-left-color: #059669; }
-        .card-mod-3 h2 { background: #059669; color: white; }
-        .card-mod-4 { background: linear-gradient(135deg, #ffedd5 0%, #fed7aa 100%); border-left-color: #d97706; }
-        .card-mod-4 h2 { background: #d97706; color: white; }
-        .card-mod-5 { background: linear-gradient(135deg, #ede9fe 0%, #ddd6fe 100%); border-left-color: #7c3aed; }
-        .card-mod-5 h2 { background: #7c3aed; color: white; }
-        .card-mod-6 { background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%); border-left-color: #f59e0b; }
-        .card-mod-6 h2 { background: #f59e0b; color: white; }
-        label {
-            display: block;
-            font-weight: 600;
-            margin-bottom: 6px;
-            color: #334155;
+        .card h2 {
+            font-size: 1rem;
+            margin: 0 0 14px 0;
+            color: #0071e3;
         }
-        .hint {
-            font-size: 12px;
-            color: #64748b;
-            margin-top: 4px;
-            margin-bottom: 8px;
-        }
+        label { display: block; font-weight: 600; margin-bottom: 6px; color: #333; }
+        .hint { font-size: 12px; color: #6e6e73; margin-top: 4px; margin-bottom: 8px; }
         input[type="text"], textarea, select {
             width: 100%;
             padding: 10px 12px;
-            border: 1px solid rgba(0,0,0,0.12);
+            border: 1px solid #d2d2d7;
             border-radius: 8px;
             font-size: 14px;
-            font-family: inherit;
-            background: rgba(255,255,255,0.9);
         }
         input:focus, textarea:focus, select:focus {
             outline: none;
-            border-color: #667eea;
-            box-shadow: 0 0 0 2px rgba(102,126,234,0.2);
+            border-color: #0071e3;
         }
-        textarea {
-            min-height: 120px;
-            resize: vertical;
-        }
-        .row {
-            display: flex;
-            gap: 16px;
-            margin-bottom: 16px;
-        }
-        .row > div { flex: 1; }
+        .row { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px; }
+        .row:last-child { margin-bottom: 0; }
+        @media (max-width: 600px) { .row { grid-template-columns: 1fr; } }
         .field-row {
             display: flex;
-            gap: 12px;
+            gap: 10px;
             align-items: center;
             margin-bottom: 10px;
         }
-        .field-row input:first-child { flex: 2; }
-        .field-row select { flex: 1; max-width: 120px; }
+        .field-row input:first-child { flex: 2; min-width: 0; }
+        .field-row select { flex: 1; max-width: 100px; }
         .btn {
             padding: 10px 20px;
             border: none;
@@ -105,171 +65,119 @@
             font-size: 14px;
             cursor: pointer;
             font-weight: 500;
-            transition: transform 0.15s, box-shadow 0.15s;
         }
-        .btn:hover { transform: translateY(-1px); }
-        .btn-primary {
-            background: linear-gradient(135deg, #667eea, #764ba2);
-            color: white;
-            box-shadow: 0 4px 12px rgba(102,126,234,0.4);
-        }
-        .btn-primary:hover { box-shadow: 0 6px 16px rgba(102,126,234,0.5); }
-        .btn-secondary {
-            background: linear-gradient(135deg, #e2e8f0, #cbd5e1);
-            color: #475569;
-        }
-        .btn-secondary:hover { background: linear-gradient(135deg, #cbd5e1, #94a3b8); }
-        .btn-danger {
-            background: linear-gradient(135deg, #f87171, #ef4444);
-            color: white;
-            padding: 6px 12px;
+        .btn-primary { background: #0071e3; color: #fff; }
+        .btn-primary:hover { background: #0077ed; }
+        .btn-secondary { background: #e8e8ed; color: #1d1d1f; margin-left: 10px; }
+        .btn-secondary:hover { background: #d2d2d7; }
+        .btn-danger { background: #ff3b30; color: #fff; padding: 6px 12px; font-size: 12px; }
+        .output-block {
+            background: #1d1d1f;
+            color: #e8e8ed;
+            padding: 16px;
+            border-radius: 8px;
+            font-family: "Monaco", "Menlo", monospace;
             font-size: 12px;
-        }
-        .btn-danger:hover { background: linear-gradient(135deg, #ef4444, #dc2626); }
-        #output {
-            background: #0f172a;
-            color: #e2e8f0;
-            padding: 20px;
-            border-radius: 10px;
-            font-family: "Monaco", "Menlo", "Consolas", monospace;
-            font-size: 13px;
+            line-height: 1.5;
             white-space: pre-wrap;
             word-break: break-all;
-            max-height: 400px;
+            min-height: 80px;
+            max-height: 350px;
             overflow-y: auto;
-            margin-top: 16px;
-            border: 1px solid #334155;
+            margin-top: 12px;
         }
-        .success-msg {
-            background: linear-gradient(135deg, #86efac, #4ade80);
-            color: #14532d;
-            padding: 12px 16px;
+        .output-block:empty::before { content: '点击上方按钮生成'; color: #6e6e73; }
+        .gen-section { margin-bottom: 24px; padding-bottom: 24px; border-bottom: 1px solid #e5e5ea; }
+        .gen-section:last-of-type { margin-bottom: 0; padding-bottom: 0; border-bottom: none; }
+        .toast {
+            position: fixed;
+            bottom: 24px;
+            right: 24px;
+            padding: 12px 20px;
             border-radius: 8px;
-            margin-top: 10px;
-            display: none;
-            font-weight: 600;
+            font-weight: 500;
+            z-index: 1000;
         }
-        .success-msg.show { display: block; }
+        .toast.success { background: #34c759; color: #fff; }
+        .toast.error { background: #ff3b30; color: #fff; }
     </style>
 </head>
 <body>
-    <h1>📋 表验收工具 - 配置生成器</h1>
-    <p style="color:#718096; margin-bottom:24px;">填写下方表单，点击「生成配置代码」即可得到可直接粘贴到 Python 脚本中的配置代码。</p>
+    <h1>表验收自动化代码生成</h1>
+    <p class="subtitle">填写表名、限制条件、字段信息，可分别生成 Python 代码和 SQL 代码。无需安装任何东西，双击本文件用浏览器打开即可使用。</p>
 
-    <div class="card card-mod-1">
+    <div class="card">
         <h2>1. 表名称</h2>
         <div class="row">
             <div>
-                <label for="oldTable">老表名（OLD_TABLE_NAME）</label>
+                <label for="oldTable">老表名 <span style="color:#ff3b30;font-size:11px;">必填</span></label>
                 <div class="hint">例如：dws_zdm.dws_zdm_hive_trade_order_direct_smzdmid</div>
-                <input type="text" id="oldTable" placeholder="dws_zdm.xxx" value="dws_zdm.dws_zdm_hive_trade_order_direct_smzdmid">
+                <input type="text" id="oldTable" placeholder="dws_zdm.xxx">
             </div>
             <div>
-                <label for="newTable">新表名（NEW_TABLE_NAME）</label>
+                <label for="newTable">新表名 <span style="color:#ff3b30;font-size:11px;">必填</span></label>
                 <div class="hint">例如：dws_zdm.tmp_dws_zdm_hive_trade_order_direct_smzdmid</div>
-                <input type="text" id="newTable" placeholder="dws_zdm.tmp_xxx" value="dws_zdm.tmp_dws_zdm_hive_trade_order_direct_smzdmid">
+                <input type="text" id="newTable" placeholder="dws_zdm.tmp_xxx">
             </div>
         </div>
     </div>
 
-    <div class="card card-mod-2">
-        <h2>2. 老表查询 SQL（OLD_TABLE_SQL）</h2>
-        <div class="hint">SELECT 的字段顺序需与下方「字段信息」一致。可用 {OLD_TABLE_NAME} 作为占位符，会自动替换为老表名。</div>
-        <textarea id="oldSql" placeholder="SELECT field1, field2, ... FROM {OLD_TABLE_NAME} WHERE dt = '2026-02-15'">SELECT order_create_time,
-        order_create_date,
-        zdm_id,
-        pro_id,
-        mall_name,
-        mall_id,
-        pro_link,
-        pro_gmv,
-        pro_cps,
-        sku_order,
-        ascribe_article_id,
-        direct_article_id,
-        clean_link,
-        marketing_id
-FROM {OLD_TABLE_NAME}
-WHERE dt = '2026-02-15'</textarea>
+    <div class="card">
+        <h2>2. 限制条件（WHERE 子句）</h2>
+        <div class="row">
+            <div>
+                <label for="oldWhere">老表限制条件</label>
+                <div class="hint">例如：dt = '2026-02-15'，不需要写 WHERE 关键字</div>
+                <input type="text" id="oldWhere" placeholder="dt = '2026-02-15'">
+            </div>
+            <div>
+                <label for="newWhere">新表限制条件</label>
+                <div class="hint">例如：dt = '2026-02-15' and mall_name not regexp '美团'</div>
+                <input type="text" id="newWhere" placeholder="dt = '2026-02-15'">
+            </div>
+        </div>
     </div>
 
-    <div class="card card-mod-3">
-        <h2>3. 新表查询 SQL（NEW_TABLE_SQL）</h2>
-        <div class="hint">可用 {NEW_TABLE_NAME} 作为占位符。新表通常会有额外的 WHERE 条件（如排除美团）。</div>
-        <textarea id="newSql" placeholder="SELECT ... FROM {NEW_TABLE_NAME} WHERE ...">SELECT order_create_time,
-        order_create_date,
-        zdm_id,
-        pro_id,
-        mall_name,
-        mall_id,
-        pro_link,
-        pro_gmv,
-        pro_cps,
-        sku_order,
-        ascribe_article_id,
-        direct_article_id,
-        clean_link,
-        marketing_id
-FROM {NEW_TABLE_NAME}
-WHERE dt = '2026-02-15'
-and mall_name not regexp '美团'</textarea>
-    </div>
-
-    <div class="card card-mod-4">
-        <h2>4. 字段信息（FIELD_INFO）</h2>
-        <div class="hint">字段名与类型需与上面 SQL 的 SELECT 字段一一对应。类型：str（维度）、int、float（数值）</div>
+    <div class="card">
+        <h2>3. 字段名称与类型 <span style="color:#ff3b30;font-size:11px;">必填</span></h2>
+        <div class="hint">str=字符串/维度，int/float=数值型。生成代码将实现：①数据条数 ②数值sum ③按str字段group by汇总 ④全str字段full outer join后sum</div>
         <div id="fieldList"></div>
         <button type="button" class="btn btn-secondary" onclick="addField()" style="margin-top:10px;">+ 添加字段</button>
     </div>
 
-    <div class="card card-mod-5">
-        <h2>5. 可选配置</h2>
-        <div class="row">
-            <div>
-                <label for="groupFields">分组维度字段（GROUP_FIELDS）</label>
-                <div class="hint">逗号分隔，如 order_create_date,zdm_id。留空表示用全部 str 字段</div>
-                <input type="text" id="groupFields" placeholder="留空或 order_create_date, zdm_id">
-            </div>
-            <div>
-                <label for="sampleRatio">明细采样比例（SAMPLE_RATIO）</label>
-                <div class="hint">0.1 表示 10%，留空表示全量。数据量大时建议填 0.01~0.1</div>
-                <input type="text" id="sampleRatio" placeholder="留空或 0.1">
-            </div>
-        </div>
-    </div>
+    <div class="card">
+        <h2>4. 生成代码</h2>
 
-    <div class="card card-mod-6">
-        <h2>6. 生成与输出</h2>
-        <button type="button" class="btn btn-primary" onclick="generate()">生成配置代码</button>
-        <button type="button" class="btn btn-secondary" onclick="copyCode()" style="margin-left:10px;">复制到剪贴板</button>
-        <div id="successMsg" class="success-msg">已复制到剪贴板！</div>
-        <div id="output"></div>
+        <div class="gen-section">
+            <h3 style="font-size:0.9rem;margin:0 0 10px 0;color:#333;">生成 Python 代码</h3>
+            <button type="button" class="btn btn-primary" onclick="generatePython()">生成 Python 代码</button>
+            <button type="button" class="btn btn-secondary" onclick="copyCode('python')">复制 Python</button>
+            <div id="outputPython" class="output-block" data-code=""></div>
+        </div>
+
+        <div class="gen-section">
+            <h3 style="font-size:0.9rem;margin:0 0 10px 0;color:#333;">生成 SQL 代码</h3>
+            <button type="button" class="btn btn-primary" onclick="generateSql()">生成 SQL 代码</button>
+            <button type="button" class="btn btn-secondary" onclick="copyCode('sql')">复制 SQL</button>
+            <div id="outputSql" class="output-block" data-code=""></div>
+        </div>
     </div>
 
     <script>
         const defaultFields = [
-            ['order_create_time', 'str'],
-            ['order_create_date', 'str'],
-            ['zdm_id', 'str'],
-            ['pro_id', 'str'],
-            ['mall_name', 'str'],
-            ['mall_id', 'str'],
-            ['pro_link', 'str'],
-            ['pro_gmv', 'float'],
-            ['pro_cps', 'float'],
-            ['sku_order', 'float'],
-            ['ascribe_article_id', 'str'],
-            ['direct_article_id', 'str'],
-            ['clean_link', 'str'],
-            ['marketing_id', 'str']
+            ['order_create_time','str'],['order_create_date','str'],['zdm_id','str'],['pro_id','str'],
+            ['mall_name','str'],['mall_id','str'],['pro_link','str'],['pro_gmv','float'],
+            ['pro_cps','float'],['sku_order','float'],['ascribe_article_id','str'],['direct_article_id','str'],
+            ['clean_link','str'],['marketing_id','str']
         ];
-
-        function renderFields() {
-            const list = document.getElementById('fieldList');
-            const data = JSON.parse(localStorage.getItem('fieldInfo') || JSON.stringify(defaultFields));
-            list.innerHTML = data.map((f, i) => `
-                <div class="field-row" data-idx="${i}">
-                    <input type="text" placeholder="字段名" value="${escapeHtml(f[0])}">
+        function getStored(){ try{ const s=localStorage.getItem('tv_fields'); return s?JSON.parse(s):defaultFields; }catch(_){ return defaultFields; } }
+        function saveFields(d){ localStorage.setItem('tv_fields',JSON.stringify(d)); }
+        function renderFields(){
+            const list=document.getElementById('fieldList');
+            const data=getStored();
+            list.innerHTML=data.map((f,i)=>`
+                <div class="field-row">
+                    <input type="text" placeholder="字段名" value="${(f[0]||'').replace(/"/g,'&quot;')}">
                     <select>
                         <option value="str" ${f[1]==='str'?'selected':''}>str</option>
                         <option value="int" ${f[1]==='int'?'selected':''}>int</option>
@@ -279,104 +187,294 @@ and mall_name not regexp '美团'</textarea>
                 </div>
             `).join('');
         }
-
-        function escapeHtml(s) {
-            const div = document.createElement('div');
-            div.textContent = s;
-            return div.innerHTML;
-        }
-
-        function addField() {
-            const data = JSON.parse(localStorage.getItem('fieldInfo') || JSON.stringify(defaultFields));
-            data.push(['', 'str']);
-            localStorage.setItem('fieldInfo', JSON.stringify(data));
-            renderFields();
-        }
-
-        function removeField(idx) {
-            const data = JSON.parse(localStorage.getItem('fieldInfo') || JSON.stringify(defaultFields));
-            data.splice(idx, 1);
-            localStorage.setItem('fieldInfo', JSON.stringify(data));
-            renderFields();
-        }
-
-        function getFieldInfo() {
-            const rows = document.querySelectorAll('#fieldList .field-row');
-            const result = {};
-            rows.forEach(r => {
-                const name = r.querySelector('input').value.trim();
-                const type = r.querySelector('select').value;
-                if (name) result[name] = type;
+        function addField(){ const d=getStored(); d.push(['','str']); saveFields(d); renderFields(); }
+        function removeField(idx){ const d=getStored(); d.splice(idx,1); saveFields(d); renderFields(); }
+        function getFieldInfo(){
+            const rows=document.querySelectorAll('#fieldList .field-row');
+            const r=[]; rows.forEach(el=>{
+                const n=el.querySelector('input').value.trim();
+                const t=el.querySelector('select').value;
+                if(n) r.push({name:n,type:t});
             });
-            return result;
+            return r;
+        }
+        function showToast(msg,err){
+            document.querySelectorAll('.toast').forEach(e=>e.remove());
+            const t=document.createElement('div');
+            t.className='toast '+(err?'error':'success');
+            t.textContent=msg;
+            document.body.appendChild(t);
+            setTimeout(()=>t.remove(),2500);
+        }
+        function getFormData(){
+            const oldTable=document.getElementById('oldTable').value.trim();
+            const newTable=document.getElementById('newTable').value.trim();
+            const oldWhere=document.getElementById('oldWhere').value.trim();
+            const newWhere=document.getElementById('newWhere').value.trim();
+            const fields=getFieldInfo();
+            if(!oldTable||!newTable){ showToast('请填写老表名和新表名',true); return null; }
+            if(!fields.length){ showToast('请至少添加一个字段',true); return null; }
+            const strFields=fields.filter(f=>['int','float','numeric'].indexOf(f.type.toLowerCase())<0).map(f=>f.name);
+            const numFields=fields.filter(f=>['int','float','numeric'].indexOf(f.type.toLowerCase())>=0).map(f=>f.name);
+            const allFields=fields.map(f=>f.name);
+            const oldWhereClause=oldWhere?' WHERE '+oldWhere:'';
+            const newWhereClause=newWhere?' WHERE '+newWhere:'';
+            const selectClause=fields.map(f=>'                '+f.name).join(',\n');
+            const oldSql="SELECT\n"+selectClause+"\nFROM "+oldTable+oldWhereClause;
+            const newSql="SELECT\n"+selectClause+"\nFROM "+newTable+newWhereClause;
+            const fieldInfoStr=fields.map(f=>"        '"+f.name+"': '"+f.type+"'").join(',\n');
+            return {oldTable,newTable,oldWhere,newWhere,fields,strFields,numFields,allFields,oldWhereClause,newWhereClause,oldSql,newSql,fieldInfoStr};
         }
 
-        function generate() {
-            const oldTable = document.getElementById('oldTable').value.trim();
-            const newTable = document.getElementById('newTable').value.trim();
-            let oldSql = document.getElementById('oldSql').value.trim();
-            let newSql = document.getElementById('newSql').value.trim();
-            const groupFields = document.getElementById('groupFields').value.trim();
-            const sampleRatio = document.getElementById('sampleRatio').value.trim();
+        function generatePython(){
+            const d=getFormData(); if(!d) return;
+            const code=`# 表验收自动化代码 - 由网页生成
+from pyspark.sql import SparkSession
+import os
+memory = '10g'
+pyspark_submit_args = ' --driver-memory ' + memory + ' pyspark-shell'
+os.environ["PYSPARK_SUBMIT_ARGS"] = pyspark_submit_args
 
-            const fieldInfo = getFieldInfo();
-            const fieldInfoStr = Object.entries(fieldInfo).map(([k,v]) => `        '${k}': '${v}'`).join(',\n');
+from pyspark.sql import SparkSession
+from pyspark.sql import functions as fn
+spark = SparkSession.builder.master('yarn').appName("table_validation").enableHiveSupport()\\
+    .config('spark.yarn.queue','bi').getOrCreate()
 
-            let groupFieldsStr = 'None';
-            if (groupFields) {
-                const arr = groupFields.split(/[,，]/).map(s=>s.trim()).filter(Boolean);
-                groupFieldsStr = `['${arr.join("', '")}']`;
-            }
+import pandas as pd
+import numpy as np
+from typing import Dict, List
+import warnings
+import sys
+warnings.filterwarnings('ignore')
 
-            let sampleRatioStr = 'None';
-            if (sampleRatio) {
-                const num = parseFloat(sampleRatio);
-                if (!isNaN(num) && num > 0 && num < 1) sampleRatioStr = num;
-            }
+class SparkTableComparator:
+    """基于Spark SQL的新老表数据对比：①数据条数 ②数值sum ③按str字段group by汇总 ④全str字段full outer join后sum"""
+    def __init__(self, old_table_sql: str, new_table_sql: str, field_info: Dict[str, str]):
+        self.old_table_sql = old_table_sql
+        self.new_table_sql = new_table_sql
+        self.field_info = field_info
+        self.old_df = self._load_spark_data(old_table_sql)
+        self.new_df = self._load_spark_data(new_table_sql)
+        self.numeric_fields = [f for f, t in field_info.items() if t in ['int', 'float', 'numeric']]
+        self.dimension_fields = [f for f, t in field_info.items() if t not in ['int', 'float', 'numeric']]
+        self._align_columns()
+        self.compare_results = {}
 
-            const code = `    # ====================== 用户配置区 ======================
-    # 1. 新老表名称
-    OLD_TABLE_NAME = "${oldTable}"
-    NEW_TABLE_NAME = "${newTable}"
+    def _align_columns(self):
+        for col in self.field_info:
+            if self.old_df is not None and col not in self.old_df.columns: self.old_df[col] = np.nan
+            if self.new_df is not None and col not in self.new_df.columns: self.new_df[col] = np.nan
+        common = (set(self.old_df.columns) if self.old_df is not None else set()) & (set(self.new_df.columns) if self.new_df is not None else set())
+        self.numeric_fields = [f for f in self.numeric_fields if f in common]
+        self.dimension_fields = [f for f in self.dimension_fields if f in common]
 
-    # 2. 新老表查询SQL（确保查询字段和顺序与FIELD_INFO一致）
-    OLD_TABLE_SQL = f"""
-${oldSql.split('\n').map(l=>'        '+l).join('\n')}
+    def _load_spark_data(self, sql: str):
+        try:
+            spark_df = spark.sql(sql).select(*list(self.field_info.keys()))
+            df = spark_df.toPandas() or pd.DataFrame()
+            for field, dtype in self.field_info.items():
+                try:
+                    if dtype == 'int': df[field] = pd.to_numeric(df[field], downcast='integer', errors='coerce')
+                    elif dtype == 'float': df[field] = pd.to_numeric(df[field], downcast='float', errors='coerce')
+                    elif dtype == 'str': df[field] = df[field].astype(str).replace('nan', '').replace('None', '')
+                except: pass
+            df = df.dropna(how='all')
+            for col in self.field_info:
+                if col not in df.columns: df[col] = np.nan
+            return df
+        except Exception as e:
+            raise RuntimeError(f"执行Spark SQL失败: {str(e)}")
+
+    def compare_row_count(self):
+        old_count = len(self.old_df) if self.old_df is not None else 0
+        new_count = len(self.new_df) if self.new_df is not None else 0
+        self.compare_results['数据量对比'] = {'老表数据量': old_count, '新表数据量': new_count, '是否一致': old_count == new_count}
+        return old_count == new_count
+
+    def compare_numeric_sum(self):
+        sum_results = {}
+        for field in self.numeric_fields:
+            if field not in self.old_df.columns or field not in self.new_df.columns: continue
+            old_sum, new_sum = self.old_df[field].sum(), self.new_df[field].sum()
+            sum_results[field] = {'老表sum值': old_sum, '新表sum值': new_sum, '是否一致': bool(np.isclose(old_sum, new_sum, rtol=1e-09))}
+        self.compare_results['数值型字段sum对比'] = sum_results
+        return sum_results
+
+    def compare_group_by_dimension(self, group_fields=None):
+        group_fields = group_fields or self.dimension_fields
+        if not group_fields: return
+        per_field_results = {}
+        for gf in group_fields:
+            if gf not in self.old_df.columns or gf not in self.new_df.columns: continue
+            old_g = self.old_df.groupby(gf)[self.numeric_fields].sum().reset_index() if self.numeric_fields else self.old_df.groupby(gf).size().reset_index(name='cnt')
+            new_g = self.new_df.groupby(gf)[self.numeric_fields].sum().reset_index() if self.numeric_fields else self.new_df.groupby(gf).size().reset_index(name='cnt')
+            num_cols = self.numeric_fields if self.numeric_fields else ['cnt']
+            merged = old_g.merge(new_g, on=gf, how='outer', suffixes=('_old', '_new'))
+            for c in merged.select_dtypes(include=[np.number]).columns: merged[c] = merged[c].fillna(0)
+            is_ok = all(np.isclose(merged[f+'_old'], merged[f+'_new'], rtol=1e-09).all() for f in num_cols) if self.numeric_fields else (merged['cnt_old']==merged['cnt_new']).all()
+            per_field_results[gf] = {'是否一致': bool(is_ok), '分组字段': gf}
+        self.compare_results['维度分组对比'] = {'各维度分组对比': per_field_results}
+        return per_field_results
+
+    def compare_detail_data(self):
+        join_keys = [f for f in self.dimension_fields if f in self.old_df.columns and f in self.new_df.columns]
+        if not join_keys:
+            self.compare_results['全字段明细对比'] = {'是否一致': False, '说明': '无可用维度字段做join'}
+            return False
+        merged = self.old_df.merge(self.new_df, on=join_keys, how='outer', suffixes=('_old', '_new'), indicator=True)
+        only_old = (merged['_merge'] == 'left_only').sum()
+        only_new = (merged['_merge'] == 'right_only').sum()
+        both = (merged['_merge'] == 'both').sum()
+        has_orphan = only_old > 0 or only_new > 0
+        merged_both = merged[merged['_merge'] == 'both']
+        num_ok = True
+        if len(merged_both) > 0 and self.numeric_fields:
+            for f in self.numeric_fields:
+                ocol, ncol = f+'_old', f+'_new'
+                if ocol in merged_both.columns and ncol in merged_both.columns:
+                    mask = np.isclose(merged_both[ocol].fillna(0), merged_both[ncol].fillna(0), rtol=1e-09)
+                    if not mask.all(): num_ok = False
+        is_consistent = not has_orphan and num_ok
+        self.compare_results['全字段明细对比'] = {
+            '是否一致': is_consistent,
+            'join说明': f'按{join_keys}做full outer join',
+            '仅老表有行数': int(only_old), '仅新表有行数': int(only_new), '两表都有行数': int(both)
+        }
+        return is_consistent
+
+    def run_all_comparisons(self, group_fields=None, sample_ratio=None):
+        self.compare_results['查询SQL'] = {'老表SQL': self.old_table_sql, '新表SQL': self.new_table_sql}
+        self.compare_row_count()
+        self.compare_numeric_sum()
+        self.compare_group_by_dimension(group_fields)
+        self.compare_detail_data()
+        all_ok = (
+            self.compare_results['数据量对比']['是否一致'] and
+            all(r.get('是否一致') for r in (self.compare_results.get('数值型字段sum对比') or {}).values() if isinstance(r, dict)) and
+            all(p.get('是否一致') for p in (self.compare_results.get('维度分组对比',{}).get('各维度分组对比',{}) or {}).values()) and
+            self.compare_results.get('全字段明细对比',{}).get('是否一致', True)
+        )
+        self.compare_results['整体结论'] = {'所有维度是否一致': all_ok}
+        return self.compare_results
+
+    def print_results(self):
+        print("="*60)
+        print("新老表数据对比结果")
+        print("="*60)
+        for k, v in self.compare_results.items():
+            if k == '查询SQL': continue
+            print(f"\\n【{k}】")
+            if isinstance(v, dict):
+                for kk, vv in v.items():
+                    if isinstance(vv, dict):
+                        print(f"  {kk}: {vv}")
+                    else:
+                        print(f"  {kk}: {vv}")
+            else:
+                print(v)
+        print("="*60)
+
+def main():
+    OLD_TABLE_NAME = "${d.oldTable.replace(/\\/g,'\\\\').replace(/"/g,'\\"')}"
+    NEW_TABLE_NAME = "${d.newTable.replace(/\\/g,'\\\\').replace(/"/g,'\\"')}"
+    OLD_TABLE_SQL = """
+${d.oldSql.split('\n').map(l=>'        '+l.replace(/\\/g,'\\\\').replace(/`/g,'\\`')).join('\n')}
     """
-
-    NEW_TABLE_SQL = f"""
-${newSql.split('\n').map(l=>'        '+l).join('\n')}
+    NEW_TABLE_SQL = """
+${d.newSql.split('\n').map(l=>'        '+l.replace(/\\/g,'\\\\').replace(/`/g,'\\`')).join('\n')}
     """
-
-    # 3. 配置字段信息（字段名: 字段类型）
     FIELD_INFO = {
-${fieldInfoStr}
+${d.fieldInfoStr}
     }
+    GROUP_FIELDS = None
+    SAMPLE_RATIO = None
 
-    # 4. 分组对比的维度字段（None表示用全部str字段）
-    GROUP_FIELDS = ${groupFieldsStr}
+    print(f"正在对比Spark SQL表：老表[{OLD_TABLE_NAME}] vs 新表[{NEW_TABLE_NAME}]")
+    print("-"*60)
+    try:
+        comparator = SparkTableComparator(old_table_sql=OLD_TABLE_SQL, new_table_sql=NEW_TABLE_SQL, field_info=FIELD_INFO)
+        results = comparator.run_all_comparisons(group_fields=GROUP_FIELDS, sample_ratio=SAMPLE_RATIO)
+        comparator.print_results()
+    except Exception as e:
+        print(f"程序执行失败: {str(e)}")
+        sys.exit(1)
 
-    # 5. 明细对比采样比例（None表示全量，数据量大时建议0.01~0.1）
-    SAMPLE_RATIO = ${sampleRatioStr}
-    # =======================================================`;
-
-            document.getElementById('output').textContent = code;
-            document.getElementById('output').dataset.code = code;
+if __name__ == "__main__":
+    main()
+`;
+            const el=document.getElementById('outputPython');
+            el.textContent=code;
+            el.dataset.code=code;
+            showToast('Python 代码生成成功');
         }
 
-        function copyCode() {
-            const code = document.getElementById('output').dataset.code;
-            if (!code) {
-                alert('请先点击「生成配置代码」');
-                return;
+        function generateSql(){
+            const d=getFormData(); if(!d) return;
+            let sql='-- 表验收自动化 SQL - 由网页生成\n';
+            sql+='-- 老表: '+d.oldTable+'\n';
+            sql+='-- 新表: '+d.newTable+'\n\n';
+
+            sql+='-- ========== 1. 新老表数据条数 ==========\n';
+            sql+='SELECT \'老表\' AS table_type, COUNT(*) AS cnt FROM '+d.oldTable+d.oldWhereClause+'\n';
+            sql+='UNION ALL\n';
+            sql+='SELECT \'新表\' AS table_type, COUNT(*) AS cnt FROM '+d.newTable+d.newWhereClause+'\n\n';
+
+            if(d.numFields.length>0){
+                sql+='-- ========== 2. 新老表数值型字段 sum 值 ==========\n';
+                const sumCols=d.numFields.map(f=>'SUM('+f+') AS '+f+'_sum').join(', ');
+                sql+='SELECT \'老表\' AS table_type, '+sumCols+' FROM '+d.oldTable+d.oldWhereClause+'\n';
+                sql+='UNION ALL\n';
+                sql+='SELECT \'新表\' AS table_type, '+sumCols+' FROM '+d.newTable+d.newWhereClause+'\n\n';
             }
-            navigator.clipboard.writeText(code).then(() => {
-                const msg = document.getElementById('successMsg');
-                msg.classList.add('show');
-                setTimeout(() => msg.classList.remove('show'), 2000);
-            }).catch(() => alert('复制失败，请手动选择并复制'));
+
+            if(d.strFields.length>0){
+                sql+='-- ========== 3. 按字符串字段 group by 汇总数值型字段 ==========\n';
+                for(let i=0;i<d.strFields.length;i++){
+                    const gf=d.strFields[i];
+                    const aggCols=d.numFields.length>0 ? d.numFields.map(f=>'SUM('+f+') AS '+f+'_sum').join(', ') : 'COUNT(*) AS cnt';
+                    sql+='-- 按 ['+gf+'] 分组\n';
+                    sql+='SELECT \'老表\' AS table_type, '+gf+', '+aggCols+' FROM '+d.oldTable+d.oldWhereClause+' GROUP BY '+gf+'\n';
+                    sql+='UNION ALL\n';
+                    sql+='SELECT \'新表\' AS table_type, '+gf+', '+aggCols+' FROM '+d.newTable+d.newWhereClause+' GROUP BY '+gf+'\n\n';
+                }
+            }
+
+            if(d.strFields.length>0){
+                sql+='-- ========== 4. 全字符串字段 full outer join 后 sum 数值型字段 ==========\n';
+                const joinCond=d.strFields.map(f=>'o.'+f+' = n.'+f).join(' AND ');
+                const sumSelect=d.numFields.length>0
+                    ? d.numFields.flatMap(f=>['SUM(old_'+f+') AS old_'+f+'_total','SUM(new_'+f+') AS new_'+f+'_total']).join(',\n       ')
+                    : 'COUNT(*) AS total_cnt';
+                sql+='WITH old_data AS (\n';
+                sql+='    SELECT '+d.allFields.join(', ')+' FROM '+d.oldTable+d.oldWhereClause+'\n';
+                sql+='),\n';
+                sql+='new_data AS (\n';
+                sql+='    SELECT '+d.allFields.join(', ')+' FROM '+d.newTable+d.newWhereClause+'\n';
+                sql+='),\n';
+                sql+='joined AS (\n';
+                sql+='    SELECT \n';
+                sql+=d.strFields.map(f=>'        COALESCE(o.'+f+', n.'+f+') AS '+f).join(',\n');
+                if(d.numFields.length>0){
+                    sql+=',\n'+d.numFields.map(f=>'        COALESCE(o.'+f+', 0) AS old_'+f+',\n        COALESCE(n.'+f+', 0) AS new_'+f).join(',\n');
+                }
+                sql+='\n    FROM old_data o\n';
+                sql+='    FULL OUTER JOIN new_data n ON '+joinCond+'\n';
+                sql+=')\n';
+                sql+='SELECT '+sumSelect+' FROM joined;\n';
+            }
+
+            const el=document.getElementById('outputSql');
+            el.textContent=sql;
+            el.dataset.code=sql;
+            showToast('SQL 代码生成成功');
         }
 
+        function copyCode(type){
+            const el=type==='python'?document.getElementById('outputPython'):document.getElementById('outputSql');
+            const code=el.dataset.code;
+            if(!code){ showToast('请先点击「生成'+(type==='python'?'Python':'SQL')+'代码」',true); return; }
+            navigator.clipboard.writeText(code).then(()=>showToast('已复制到剪贴板')).catch(()=>showToast('复制失败，请手动选择复制',true));
+        }
         renderFields();
     </script>
 </body>
