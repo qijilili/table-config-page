@@ -206,6 +206,611 @@
             document.body.appendChild(t);
             setTimeout(()=>t.remove(),2500);
         }
+        const PYTHON_TEMPLATE = `# 启动spark集群
+from pyspark.sql import SparkSession
+import os
+
+memory = '10g'
+pyspark_submit_args = ' --driver-memory ' + memory + ' pyspark-shell'
+os.environ["PYSPARK_SUBMIT_ARGS"] = pyspark_submit_args
+
+from pyspark import SparkContext, SQLContext, SparkConf
+from pyspark.sql import SparkSession
+from pyspark.sql import functions as fn
+# spark.stop()
+spark = SparkSession \\
+    .builder.master('yarn') \\
+    .appName("jupyter_bi4986") \\
+    .enableHiveSupport()\\
+    .config('spark.yarn.queue','bi') \\
+    .config('spark.sql.shuffle.partitions', 600).config("spark.default.parallelism", 600)\\
+    .config('spark.driver.memory', '8g').config('spark.driver.maxResultsSize', '6g') \\
+    .config('spark.executor.memory', '20g').config('spark.executor.cores', '18').config('spark.executor.instances','10') \\
+    .getOrCreate()
+
+import pandas as pd
+import numpy as np
+from typing import Dict, List, Tuple
+import warnings
+import sys
+# 假设你的环境已提前初始化好SparkSession，无需额外导入和配置
+# from pyspark.sql import SparkSession
+# spark = SparkSession.builder.enableHiveSupport().getOrCreate()  # 环境已存在则注释
+
+warnings.filterwarnings('ignore')
+class SparkTableComparator:
+    """
+    基于Spark SQL的新老表数据对比工具类
+    前提：Python环境已连接Spark集群，spark.sql()可直接执行SQL
+    支持：数据量对比、数值字段sum对比、维度分组对比、全字段明细对比
+    """
+    def __init__(self, old_table_sql: str, new_table_sql: str, 
+                 field_info: Dict[str, str]):
+        """
+        初始化对比工具（从Spark SQL拉取数据）
+        :param old_table_sql: 老表查询SQL
+        :param new_table_sql: 新表查询SQL
+        :param field_info: 字段信息字典，格式：{字段名: 字段类型}
+        """
+        self.old_table_sql = old_table_sql
+        self.new_table_sql = new_table_sql
+        self.field_info = field_info
+        
+        # 从Spark SQL加载数据（转为Pandas DataFrame）
+        self.old_df = self._load_spark_data(old_table_sql)
+        self.new_df = self._load_spark_data(new_table_sql)
+        
+        # 分离数值型字段和维度字段
+        self.numeric_fields = [f for f, t in field_info.items() if t in ['int', 'float', 'numeric']]
+        self.dimension_fields = [f for f, t in field_info.items() if t not in ['int', 'float', 'numeric']]
+        # 加载后按实际存在的列对齐，避免新老表列不一致导致 KeyError
+        self._align_columns()
+        # 对比结果存储
+        self.compare_results = {}
+    
+    def _align_columns(self):
+        """确保新老表都包含 field_info 中的列（缺失的补空），并只使用两表共有的列做对比"""
+        for col in self.field_info:
+            if self.old_df is not None and col not in self.old_df.columns:
+                self.old_df[col] = np.nan
+            if self.new_df is not None and col not in self.new_df.columns:
+                self.new_df[col] = np.nan
+        old_cols = set(self.old_df.columns) if self.old_df is not None else set()
+        new_cols = set(self.new_df.columns) if self.new_df is not None else set()
+        common = old_cols & new_cols
+        self.numeric_fields = [f for f in self.numeric_fields if f in common]
+        self.dimension_fields = [f for f in self.dimension_fields if f in common]
+
+    def _load_spark_data(self, sql: str) -> pd.DataFrame:
+        """从Spark SQL执行SQL并转换为Pandas DataFrame"""
+        try:
+            # 执行Spark SQL（环境已提前初始化好spark对象）
+            spark_df = spark.sql(sql)
+            
+            # 按字段信息筛选字段，确保字段顺序和类型匹配
+            field_names = list(self.field_info.keys())
+            spark_df = spark_df.select(*field_names)
+            
+            # 转换为Pandas DataFrame（注意数据量，过大建议采样）
+            # 若数据量超大，可先通过spark_df.sample(0.1)采样对比
+            df = spark_df.toPandas()
+            if df is None:
+                df = pd.DataFrame()
+            
+            # 字段类型转换
+            for field, dtype in self.field_info.items():
+                try:
+                    if dtype == 'int':
+                        df[field] = pd.to_numeric(df[field], downcast='integer', errors='coerce')
+                    elif dtype == 'float':
+                        df[field] = pd.to_numeric(df[field], downcast='float', errors='coerce')
+                    elif dtype == 'str':
+                        df[field] = df[field].astype(str).replace('nan', '').replace('None', '')
+                except Exception as e:
+                    print(f"警告：字段 {field} 类型转换失败，使用原始类型: {str(e)}")
+            
+            # 去除空行和全空列（保留 field_info 中的列，避免后续对比缺列报错）
+            df = df.dropna(how='all')
+            drop_cols = [c for c in df.columns if df[c].isna().all() and c not in self.field_info]
+            if drop_cols:
+                df = df.drop(columns=drop_cols)
+            for col in self.field_info:
+                if col not in df.columns:
+                    df[col] = np.nan
+            return df
+        except Exception as e:
+            raise RuntimeError(f"执行Spark SQL失败: {sql[:100]}... 错误信息: {str(e)}")
+
+    def compare_row_count(self) -> bool:
+        """对比新老表数据量是否一致"""
+        old_df = self.old_df if self.old_df is not None else pd.DataFrame()
+        new_df = self.new_df if self.new_df is not None else pd.DataFrame()
+        old_count = len(old_df)
+        new_count = len(new_df)
+        is_consistent = old_count == new_count
+        
+        self.compare_results['数据量对比'] = {
+            '老表数据量': old_count,
+            '新表数据量': new_count,
+            '是否一致': is_consistent
+        }
+        return is_consistent
+
+    def compare_numeric_sum(self) -> Dict[str, bool]:
+        """对比数值型字段sum结果是否一致"""
+        sum_results = {}
+        
+        if not self.numeric_fields:
+            sum_results['说明'] = '无数值型字段需要对比'
+            self.compare_results['数值型字段sum对比'] = sum_results
+            return sum_results
+        
+        old_cols = set(self.old_df.columns) if self.old_df is not None else set()
+        new_cols = set(self.new_df.columns) if self.new_df is not None else set()
+        for field in self.numeric_fields:
+            if field not in old_cols or field not in new_cols:
+                sum_results[field] = {'说明': '该列在新老表中不全存在，跳过', '是否一致': None}
+                continue
+            old_sum = self.old_df[field].sum()
+            new_sum = self.new_df[field].sum()
+            # 处理浮点数精度问题
+            is_consistent = np.isclose(old_sum, new_sum, rtol=1e-09)
+            
+            sum_results[field] = {
+                '老表sum值': old_sum,
+                '新表sum值': new_sum,
+                '是否一致': bool(is_consistent)
+            }
+        
+        self.compare_results['数值型字段sum对比'] = sum_results
+        return {f: sum_results[f]['是否一致'] for f in self.numeric_fields if isinstance(sum_results.get(f), dict) and sum_results[f].get('是否一致') is not None}
+
+    def _is_empty_null_zero(self, val) -> bool:
+        """判断枚举值是否为空、null、0"""
+        if pd.isna(val):
+            return True
+        s = str(val).strip().lower()
+        if s in ('', 'null', 'none', 'nan'):
+            return True
+        if s == '0':
+            return True
+        try:
+            if float(val) == 0:
+                return True
+        except (ValueError, TypeError):
+            pass
+        return False
+
+    def _get_empty_valid_summary(self, merged, gf: str, num_fields: list) -> dict:
+        mask_empty = merged[gf].apply(self._is_empty_null_zero)
+        merged_empty = merged[mask_empty]
+        merged_valid = merged[~mask_empty]
+        result = {}
+        if num_fields:
+            for label, mdf in [('空/null/0', merged_empty), ('非空/null/0', merged_valid)]:
+                old_vals = {f: mdf[f'{f}_old'].sum() for f in num_fields}
+                new_vals = {f: mdf[f'{f}_new'].sum() for f in num_fields}
+                is_ok = all(np.isclose(old_vals[f], new_vals[f], rtol=1e-09) for f in num_fields)
+                result[label] = {'老表': old_vals, '新表': new_vals, '是否一致': is_ok}
+        else:
+            for label, mdf in [('空/null/0', merged_empty), ('非空/null/0', merged_valid)]:
+                old_cnt = mdf['cnt_x'].sum()
+                new_cnt = mdf['cnt_y'].sum()
+                is_ok = np.isclose(old_cnt, new_cnt, rtol=1e-09)
+                result[label] = {'老表': {'cnt': old_cnt}, '新表': {'cnt': new_cnt}, '是否一致': is_ok}
+        return result
+
+    def _get_diff_detail(self, df, gf: str, num_fields: list, limit: int = 10, show_full_when_small: bool = True) -> list:
+        if df is None or len(df) == 0:
+            return []
+        n_enum = df[gf].nunique()
+        if show_full_when_small and n_enum <= limit:
+            rows = df
+        else:
+            rows = df.head(limit)
+        result = []
+        for _, row in rows.iterrows():
+            enum_val = row[gf]
+            if num_fields:
+                old_data = {f: float(row.get(f'{f}_old', 0)) for f in num_fields}
+                new_data = {f: float(row.get(f'{f}_new', 0)) for f in num_fields}
+            else:
+                old_data = {'cnt': float(row.get('cnt_x', 0))}
+                new_data = {'cnt': float(row.get('cnt_y', 0))}
+            result.append({'枚举值': str(enum_val), '老表数据': old_data, '新表数据': new_data})
+        return result
+    
+    def compare_group_by_dimension(self, group_fields: List[str] = None) -> Dict[str, bool]:
+        group_results = {}
+        if group_fields is None:
+            group_fields = self.dimension_fields
+        if not group_fields:
+            group_results['说明'] = '无维度字段可用于分组对比'
+            self.compare_results['维度分组对比'] = group_results
+            return group_results
+        per_field_results = {}
+        all_consistent = True
+        all_inconsistent_fields = []
+        for gf in group_fields:
+            if gf not in self.old_df.columns or gf not in self.new_df.columns:
+                per_field_results[gf] = {'说明': '该列在新老表中不全存在，跳过', '是否一致': None}
+                continue
+            try:
+                if not self.numeric_fields:
+                    old_group = self.old_df.groupby(gf).size().reset_index(name='cnt')
+                    new_group = self.new_df.groupby(gf).size().reset_index(name='cnt')
+                    merged = old_group.merge(new_group, on=gf, how='outer')
+                    for col in merged.select_dtypes(include=[np.number]).columns:
+                        merged[col] = merged[col].fillna(0)
+                    merged['一致'] = merged['cnt_x'] == merged['cnt_y']
+                    is_consistent = merged['一致'].all()
+                    n_enum = merged[gf].nunique()
+                    if n_enum <= 10:
+                        diff_detail = self._get_diff_detail(merged, gf, [], show_full_when_small=True)
+                        empty_valid_summary = None
+                    else:
+                        diff_df = merged[~merged['一致']] if not is_consistent else None
+                        diff_detail = self._get_diff_detail(diff_df, gf, [], show_full_when_small=False) if diff_df is not None else []
+                        empty_valid_summary = self._get_empty_valid_summary(merged, gf, [])
+                    per_field_results[gf] = {'分组字段': [gf], '汇总字段': ['cnt'], '不一致的数值字段': [], '是否一致': bool(is_consistent), '枚举值数量': int(n_enum), '差异详情': diff_detail if diff_detail else '无差异', '空与非空汇总对比': empty_valid_summary}
+                else:
+                    old_group = self.old_df.groupby(gf)[self.numeric_fields].sum().reset_index()
+                    new_group = self.new_df.groupby(gf)[self.numeric_fields].sum().reset_index()
+                    merged = old_group.merge(new_group, on=gf, suffixes=('_old', '_new'), how='outer')
+                    for col in merged.select_dtypes(include=[np.number]).columns:
+                        merged[col] = merged[col].fillna(0)
+                    inconsistent_fields = []
+                    for num_field in self.numeric_fields:
+                        old_col = f'{num_field}_old'
+                        new_col = f'{num_field}_new'
+                        merged[f'{num_field}_一致'] = np.isclose(merged[old_col], merged[new_col], rtol=1e-09)
+                        if not merged[f'{num_field}_一致'].all():
+                            inconsistent_fields.append(num_field)
+                    is_consistent = len(inconsistent_fields) == 0
+                    n_enum = merged[gf].nunique()
+                    一致_cols = [c for c in merged.columns if c.endswith('_一致')]
+                    diff_df = merged[~merged[一致_cols].all(axis=1)] if 一致_cols and not is_consistent else None
+                    if n_enum <= 10:
+                        diff_detail = self._get_diff_detail(merged, gf, self.numeric_fields, show_full_when_small=True)
+                        empty_valid_summary = None
+                    else:
+                        diff_detail = self._get_diff_detail(diff_df, gf, self.numeric_fields, show_full_when_small=False) if diff_df is not None and len(diff_df) > 0 else []
+                        empty_valid_summary = self._get_empty_valid_summary(merged, gf, self.numeric_fields)
+                    per_field_results[gf] = {'分组字段': [gf], '汇总字段': self.numeric_fields, '不一致的数值字段': inconsistent_fields, '是否一致': is_consistent, '枚举值数量': int(n_enum), '差异详情': diff_detail if diff_detail else '无差异', '空与非空汇总对比': empty_valid_summary}
+                if not per_field_results[gf].get('是否一致', True):
+                    all_consistent = False
+                    all_inconsistent_fields.extend(per_field_results[gf].get('不一致的数值字段', []))
+            except Exception as e:
+                per_field_results[gf] = {'错误': str(e), '是否一致': False}
+                all_consistent = False
+        group_results = {'各维度分组对比': per_field_results, '是否整体一致': all_consistent, '不一致的数值字段': list(set(all_inconsistent_fields))}
+        self.compare_results['维度分组对比'] = group_results
+        return {'是否一致': all_consistent, '不一致字段': all_inconsistent_fields}
+
+    def compare_detail_data(self, sample_ratio: float = None) -> bool:
+        old_detail = self.old_df.copy()
+        new_detail = self.new_df.copy()
+        if sample_ratio and 0 < sample_ratio < 1:
+            old_detail = old_detail.sample(frac=sample_ratio, random_state=42)
+            new_detail = new_detail.sample(frac=sample_ratio, random_state=42)
+            print(f"明细对比采用采样方式，采样比例：{sample_ratio}")
+        join_keys = [f for f in self.dimension_fields if f in old_detail.columns and f in new_detail.columns]
+        if not join_keys:
+            self.compare_results['全字段明细对比'] = {'是否一致': False, '说明': '无可用维度字段做 join，无法对比', '采样比例': sample_ratio if sample_ratio else '全量'}
+            return False
+        merged = old_detail.merge(new_detail, on=join_keys, how='outer', suffixes=('_old', '_new'), indicator=True)
+        only_old = (merged['_merge'] == 'left_only').sum()
+        only_new = (merged['_merge'] == 'right_only').sum()
+        both = (merged['_merge'] == 'both').sum()
+        has_orphan = (only_old > 0) or (only_new > 0)
+        merged_both = merged[merged['_merge'] == 'both'].copy()
+        for col in merged_both.select_dtypes(include=[np.number]).columns:
+            merged_both[col] = merged_both[col].fillna(0)
+        num_consistent = True
+        diff_rows = []
+        if len(merged_both) > 0 and self.numeric_fields:
+            for num_field in self.numeric_fields:
+                old_col = f'{num_field}_old'
+                new_col = f'{num_field}_new'
+                if old_col in merged_both.columns and new_col in merged_both.columns:
+                    mask = np.isclose(merged_both[old_col], merged_both[new_col], rtol=1e-09)
+                    if not mask.all():
+                        num_consistent = False
+                        diff_idx = merged_both.index[~mask]
+                        diff_rows.extend(diff_idx.tolist())
+        diff_rows = list(set(diff_rows))[:10]
+        is_consistent = not has_orphan and num_consistent
+        if is_consistent:
+            diff_detail = {'是否一致': True, '采样比例': sample_ratio if sample_ratio else '全量', 'join说明': f'按{join_keys}做full outer join，老表{len(old_detail)}行，新表{len(new_detail)}行，两表都有{both}行'}
+        else:
+            diff_records = []
+            if has_orphan:
+                for _, row in merged[merged['_merge'] == 'left_only'].head(5).iterrows():
+                    rec = {'类型': '仅老表有', '枚举键': str(tuple(row[k] for k in join_keys))}
+                    for f in self.numeric_fields:
+                        rec[f'老表_{f}'] = float(row.get(f'{f}_old', row.get(f, np.nan))) if pd.notna(row.get(f'{f}_old', row.get(f, np.nan))) else None
+                        rec[f'新表_{f}'] = None
+                    diff_records.append(rec)
+                for _, row in merged[merged['_merge'] == 'right_only'].head(5).iterrows():
+                    rec = {'类型': '仅新表有', '枚举键': str(tuple(row[k] for k in join_keys))}
+                    for f in self.numeric_fields:
+                        rec[f'老表_{f}'] = None
+                        rec[f'新表_{f}'] = float(row.get(f'{f}_new', row.get(f, np.nan))) if pd.notna(row.get(f'{f}_new', row.get(f, np.nan))) else None
+                    diff_records.append(rec)
+            if diff_rows:
+                for idx in diff_rows[:5]:
+                    row = merged_both.loc[idx]
+                    rec = {'类型': '数值不一致', '枚举键': str(tuple(row[k] for k in join_keys))}
+                    for f in self.numeric_fields:
+                        v_old, v_new = row.get(f'{f}_old', np.nan), row.get(f'{f}_new', np.nan)
+                        rec[f'老表_{f}'] = float(v_old) if pd.notna(v_old) else None
+                        rec[f'新表_{f}'] = float(v_new) if pd.notna(v_new) else None
+                    diff_records.append(rec)
+            diff_detail = {'是否一致': False, '采样比例': sample_ratio if sample_ratio else '全量', 'join说明': f'按{join_keys}做full outer join', '仅老表有行数': int(only_old), '仅新表有行数': int(only_new), '两表都有行数': int(both), '差异详情（前10条）': diff_records[:10]}
+        self.compare_results['全字段明细对比'] = diff_detail
+        return is_consistent
+
+    def run_all_comparisons(self, group_fields: List[str] = None, sample_ratio: float = None) -> Dict:
+        self.compare_results['查询SQL'] = {'老表SQL': self.old_table_sql.strip(), '新表SQL': self.new_table_sql.strip()}
+        self.compare_row_count()
+        self.compare_numeric_sum()
+        self.compare_group_by_dimension(group_fields)
+        self.compare_detail_data(sample_ratio)
+        num_ok = all(self.compare_results['数值型字段sum对比'].get(f, {}).get('是否一致', True) is not False for f in self.numeric_fields)
+        all_consistent = all([self.compare_results['数据量对比']['是否一致'], num_ok, self.compare_results['维度分组对比'].get('是否整体一致', True), self.compare_results['全字段明细对比'].get('是否一致', True)])
+        inconsistent_dims = []
+        for k, v in self.compare_results.items():
+            if k == '整体结论': continue
+            if not isinstance(v, dict): continue
+            if not v.get('是否一致', v.get('是否整体一致', True)):
+                inconsistent_dims.append(k)
+        self.compare_results['整体结论'] = {'所有维度是否一致': all_consistent, '不一致维度': inconsistent_dims}
+        return self.compare_results
+
+    def _print_table(self, headers: list, rows: list, col_widths: list = None):
+        if not rows: return
+        if col_widths is None:
+            col_widths = []
+            for i, h in enumerate(headers):
+                max_val = max((len(str(r[i])) for r in rows), default=0) if rows else 0
+                col_widths.append(max(len(str(h)), max_val, 8) + 1)
+        sep = '+' + '+'.join('-' * w for w in col_widths) + '+'
+        fmt = '|' + '|'.join(f' {{:<{w-2}}} ' for w in col_widths) + '|'
+        print(sep)
+        print(fmt.format(*headers))
+        print(sep)
+        for row in rows:
+            print(fmt.format(*[str(v) for v in row]))
+        print(sep)
+    
+    def print_results(self):
+        print("="*80)
+        print("Spark SQL 新老表数据对比结果汇总")
+        print("="*80)
+        if '查询SQL' in self.compare_results:
+            sql_info = self.compare_results['查询SQL']
+            print("\\n【查询SQL】")
+            for line in sql_info.get('老表SQL', '').split('\\n'):
+                if line.strip(): print(f"  老表: {line.strip()}")
+            for line in sql_info.get('新表SQL', '').split('\\n'):
+                if line.strip(): print(f"  新表: {line.strip()}")
+        if '数据量对比' in self.compare_results:
+            r = self.compare_results['数据量对比']
+            print("\\n【数据量对比】")
+            self._print_table(['老表数据量', '新表数据量', '是否一致'], [[r.get('老表数据量', ''), r.get('新表数据量', ''), '✅' if r.get('是否一致') else '❌']])
+        if '数值型字段sum对比' in self.compare_results:
+            sr = self.compare_results['数值型字段sum对比']
+            if '说明' not in sr:
+                print("\\n【数值型字段sum对比】")
+                rows = [[f, sr[f].get('老表sum值', ''), sr[f].get('新表sum值', ''), '✅' if sr[f].get('是否一致') else '❌'] for f in sr if isinstance(sr[f], dict) and '是否一致' in sr[f]]
+                self._print_table(['字段', '老表sum', '新表sum', '是否一致'], rows)
+        if '维度分组对比' in self.compare_results:
+            gr = self.compare_results['维度分组对比']
+            per_field = gr.get('各维度分组对比', {})
+            print("\\n【维度分组对比】")
+            for gf, pf in per_field.items():
+                if not isinstance(pf, dict) or '差异详情' not in pf: continue
+                diff_detail = pf.get('差异详情')
+                n_enum = pf.get('枚举值数量', 0)
+                if diff_detail == '无差异' or not diff_detail:
+                    print(f"\\n  按 [{gf}] 分组: 无差异 ✅")
+                    if n_enum > 10 and pf.get('空与非空汇总对比'):
+                        ev_sum = pf['空与非空汇总对比']
+                        num_fields = list(pf.get('汇总字段', [])) or ['cnt']
+                        print(f"    枚举值 空/null/0 与 非空/null/0 汇总对比:")
+                        ev_rows = []
+                        for label in ['空/null/0', '非空/null/0']:
+                            if label not in ev_sum: continue
+                            s = ev_sum[label]
+                            status = '✅' if s.get('是否一致') else '❌'
+                            old_d, new_d = s.get('老表', {}), s.get('新表', {})
+                            row_old = [old_d.get(f, '') for f in num_fields]
+                            row_new = [new_d.get(f, '') for f in num_fields]
+                            ev_rows.append([label, status] + row_old + row_new)
+                        if ev_rows:
+                            ev_headers = ['类型', '是否一致'] + [f'老表_{f}' for f in num_fields] + [f'新表_{f}' for f in num_fields]
+                            self._print_table(ev_headers, ev_rows)
+                    continue
+                conclusion = '✅ 一致' if pf.get('是否一致') else '❌ 不一致'
+                suffix = f"（枚举值≤10，展示完整对比）" if n_enum <= 10 else f"（共{len(diff_detail)}条差异）"
+                print(f"\\n  按 [{gf}] 分组 对比明细 {suffix}  对比结论: {conclusion}")
+                num_fields = list(pf.get('汇总字段', [])) or ['cnt']
+                headers = ['枚举值'] + [f'老表_{f}' for f in num_fields] + [f'新表_{f}' for f in num_fields]
+                rows = []
+                for item in diff_detail:
+                    if isinstance(item, dict) and '枚举值' in item:
+                        ev = item.get('枚举值', '')
+                        old_d = item.get('老表数据', {})
+                        new_d = item.get('新表数据', {})
+                        row = [ev] + [old_d.get(f, '') for f in num_fields] + [new_d.get(f, '') for f in num_fields]
+                        rows.append(row)
+                if rows: self._print_table(headers, rows)
+                if n_enum > 10 and pf.get('空与非空汇总对比'):
+                    ev_sum = pf['空与非空汇总对比']
+                    num_fields = list(pf.get('汇总字段', [])) or ['cnt']
+                    print(f"    枚举值 空/null/0 与 非空/null/0 汇总对比:")
+                    ev_rows = []
+                    for label in ['空/null/0', '非空/null/0']:
+                        if label not in ev_sum: continue
+                        s = ev_sum[label]
+                        status = '✅' if s.get('是否一致') else '❌'
+                        old_d, new_d = s.get('老表', {}), s.get('新表', {})
+                        row_old = [old_d.get(f, '') for f in num_fields]
+                        row_new = [new_d.get(f, '') for f in num_fields]
+                        ev_rows.append([label, status] + row_old + row_new)
+                    if ev_rows:
+                        ev_headers = ['类型', '是否一致'] + [f'老表_{f}' for f in num_fields] + [f'新表_{f}' for f in num_fields]
+                        self._print_table(ev_headers, ev_rows)
+        if '全字段明细对比' in self.compare_results:
+            dr = self.compare_results['全字段明细对比']
+            print("\\n【全字段明细对比】(按str字段full outer join)")
+            if dr.get('是否一致'):
+                print(f"  无差异 ✅  {dr.get('join说明', '')}")
+            else:
+                if '说明' in dr:
+                    print(f"  {dr['说明']}")
+                else:
+                    self._print_table(['指标', '值'], [['仅老表有行数', dr.get('仅老表有行数', '')], ['仅新表有行数', dr.get('仅新表有行数', '')], ['两表都有行数', dr.get('两表都有行数', '')], ['采样比例', dr.get('采样比例', '')]])
+                    diff_list = dr.get('差异详情（前10条）', [])
+                    if diff_list:
+                        print("  差异明细:")
+                        extra_cols = [k for k in diff_list[0].keys() if k not in ('类型', '枚举键')]
+                        headers = ['类型', '枚举键'] + sorted(extra_cols)
+                        rows = [[r.get('类型',''), str(r.get('枚举键',''))] + [r.get(k,'') for k in headers[2:]] for r in diff_list]
+                        self._print_table(headers, rows)
+        if '整体结论' in self.compare_results:
+            r = self.compare_results['整体结论']
+            print("\\n【整体结论】")
+            print(f"  所有维度是否一致: {'✅ 是' if r.get('所有维度是否一致') else '❌ 否'}")
+        print("\\n" + "="*80)
+
+    def _to_native(self, obj):
+        if isinstance(obj, (np.floating, np.float32, np.float64)): return float(obj)
+        if isinstance(obj, (np.integer, np.int32, np.int64)): return int(obj)
+        if isinstance(obj, np.bool_): return bool(obj)
+        if isinstance(obj, np.ndarray): return obj.tolist()
+        if pd.isna(obj): return None
+        return obj
+
+    def save_to_excel(self, filepath: str):
+        try:
+            import openpyxl
+        except ImportError:
+            raise ImportError("保存 Excel 需要安装 openpyxl，请执行: pip install openpyxl")
+        all_rows = []
+        def add_section(module: str, rows: list, headers: list):
+            all_rows.append([f'【{module}】'] + [''] * (len(headers) - 1))
+            all_rows.append(headers)
+            for r in rows:
+                row = list(r) if isinstance(r, (list, tuple)) else [r.get(h, '') for h in headers]
+                if len(row) < len(headers): row.extend([''] * (len(headers) - len(row)))
+                all_rows.append(row[:len(headers)])
+            all_rows.append([])
+        if '查询SQL' in self.compare_results:
+            sql_info = self.compare_results['查询SQL']
+            add_section('查询SQL', [['老表', sql_info.get('老表SQL', '')], ['新表', sql_info.get('新表SQL', '')]], ['类型', 'SQL'])
+        if '数据量对比' in self.compare_results:
+            r = self.compare_results['数据量对比']
+            add_section('数据量对比', [[self._to_native(r.get('老表数据量')), self._to_native(r.get('新表数据量')), '是' if r.get('是否一致') else '否']], ['老表数据量', '新表数据量', '是否一致'])
+        if '数值型字段sum对比' in self.compare_results:
+            sr = self.compare_results['数值型字段sum对比']
+            if '说明' not in sr:
+                rows = []
+                for f in sr:
+                    if isinstance(sr[f], dict) and '是否一致' in sr[f]:
+                        rows.append([f, self._to_native(sr[f].get('老表sum值')), self._to_native(sr[f].get('新表sum值')), '是' if sr[f].get('是否一致') else '否'])
+                if rows: add_section('数值型sum对比', rows, ['字段', '老表sum', '新表sum', '是否一致'])
+        if '维度分组对比' in self.compare_results:
+            gr = self.compare_results['维度分组对比']
+            per_field = gr.get('各维度分组对比', {})
+            for gf, pf in per_field.items():
+                if not isinstance(pf, dict): continue
+                num_fields = list(pf.get('汇总字段', [])) or ['cnt']
+                headers = ['分组字段', '枚举值', '对比结论'] + [f'老表_{f}' for f in num_fields] + [f'新表_{f}' for f in num_fields]
+                section_rows = []
+                diff_detail = pf.get('差异详情')
+                if diff_detail and diff_detail != '无差异':
+                    for item in diff_detail:
+                        if isinstance(item, dict) and '枚举值' in item:
+                            old_d, new_d = item.get('老表数据', {}), item.get('新表数据', {})
+                            row = [gf, item.get('枚举值'), '一致' if pf.get('是否一致') else '不一致']
+                            row += [self._to_native(old_d.get(f)) for f in num_fields]
+                            row += [self._to_native(new_d.get(f)) for f in num_fields]
+                            section_rows.append(row)
+                if pf.get('空与非空汇总对比'):
+                    ev_sum = pf['空与非空汇总对比']
+                    for label in ['空/null/0', '非空/null/0']:
+                        if label not in ev_sum: continue
+                        s = ev_sum[label]
+                        row = [gf, label, '一致' if s.get('是否一致') else '不一致']
+                        row += [self._to_native(s['老表'].get(f)) for f in num_fields]
+                        row += [self._to_native(s['新表'].get(f)) for f in num_fields]
+                        section_rows.append(row)
+                if section_rows:
+                    add_section(f'维度分组_{gf}', section_rows, headers)
+                else:
+                    desc = pf.get('说明') or pf.get('错误') or ('无差异' if pf.get('是否一致') else '有差异')
+                    add_section(f'维度分组_{gf}', [[gf, '', desc]], ['分组字段', '枚举值', '说明'])
+        if '全字段明细对比' in self.compare_results:
+            dr = self.compare_results['全字段明细对比']
+            if dr.get('是否一致'):
+                add_section('全字段明细对比', [['无差异', dr.get('join说明', '')]], ['说明', 'join说明'])
+            elif '说明' not in dr:
+                add_section('全字段明细对比', [['仅老表有行数', self._to_native(dr.get('仅老表有行数'))], ['仅新表有行数', self._to_native(dr.get('仅新表有行数'))], ['两表都有行数', self._to_native(dr.get('两表都有行数'))], ['采样比例', dr.get('采样比例', '')]], ['指标', '值'])
+                diff_list = dr.get('差异详情（前10条）', [])
+                if diff_list:
+                    diff_headers = list(diff_list[0].keys())
+                    diff_rows = [[self._to_native(rec.get(h)) for h in diff_headers] for rec in diff_list]
+                    add_section('全字段明细_差异详情', diff_rows, diff_headers)
+        if '整体结论' in self.compare_results:
+            r = self.compare_results['整体结论']
+            inconsistent = r.get('不一致维度', [])
+            add_section('整体结论', [['是' if r.get('所有维度是否一致') else '否', ','.join(inconsistent) if inconsistent else '']], ['所有维度是否一致', '不一致维度'])
+        if all_rows:
+            max_cols = max(len(row) for row in all_rows)
+            for i, row in enumerate(all_rows):
+                if len(row) < max_cols: all_rows[i] = list(row) + [''] * (max_cols - len(row))
+            df = pd.DataFrame(all_rows)
+            with pd.ExcelWriter(filepath, engine='openpyxl') as writer:
+                df.to_excel(writer, sheet_name='对比结果', index=False, header=False)
+# 主函数：用户只需修改这里的配置即可使用
+def main():
+    __CONFIG_BLOCK__
+    
+    # 打印表名称信息
+    print(f"正在对比Spark SQL表：老表[{OLD_TABLE_NAME}] vs 新表[{NEW_TABLE_NAME}]")
+    print("-"*80)
+    
+    try:
+        # 初始化对比工具（从Spark SQL拉取数据）
+        comparator = SparkTableComparator(
+            old_table_sql=OLD_TABLE_SQL,
+            new_table_sql=NEW_TABLE_SQL,
+            field_info=FIELD_INFO
+        )
+        
+        # 执行所有对比（支持明细采样）
+        results = comparator.run_all_comparisons(
+            group_fields=GROUP_FIELDS,
+            sample_ratio=SAMPLE_RATIO
+        )
+        
+        # 打印结果
+        comparator.print_results()
+        
+        # 将结果保存为 Excel 文件
+        result_file_name = f"{OLD_TABLE_NAME.replace('.', '_').strip()}_vs_{NEW_TABLE_NAME.replace('.', '_').strip()}_对比结果.xlsx"
+        comparator.save_to_excel(result_file_name)
+        print(f"\\n对比结果已保存至：{result_file_name}")
+        
+    except Exception as e:
+        print(f"程序执行失败: {str(e)}")
+        sys.exit(1)
+
+if __name__ == "__main__":
+    main()
+`;
+
         function getFormData(){
             const oldTable=document.getElementById('oldTable').value.trim();
             const newTable=document.getElementById('newTable').value.trim();
@@ -228,182 +833,41 @@
 
         function generatePython(){
             const d=getFormData(); if(!d) return;
-            const code=`# 表验收自动化代码 - 由网页生成
-from pyspark.sql import SparkSession
-import os
-memory = '10g'
-pyspark_submit_args = ' --driver-memory ' + memory + ' pyspark-shell'
-os.environ["PYSPARK_SUBMIT_ARGS"] = pyspark_submit_args
-
-from pyspark.sql import SparkSession
-from pyspark.sql import functions as fn
-spark = SparkSession.builder.master('yarn').appName("table_validation").enableHiveSupport()\\
-    .config('spark.yarn.queue','bi').getOrCreate()
-
-import pandas as pd
-import numpy as np
-from typing import Dict, List
-import warnings
-import sys
-warnings.filterwarnings('ignore')
-
-class SparkTableComparator:
-    """基于Spark SQL的新老表数据对比：①数据条数 ②数值sum ③按str字段group by汇总 ④全str字段full outer join后sum"""
-    def __init__(self, old_table_sql: str, new_table_sql: str, field_info: Dict[str, str]):
-        self.old_table_sql = old_table_sql
-        self.new_table_sql = new_table_sql
-        self.field_info = field_info
-        self.old_df = self._load_spark_data(old_table_sql)
-        self.new_df = self._load_spark_data(new_table_sql)
-        self.numeric_fields = [f for f, t in field_info.items() if t in ['int', 'float', 'numeric']]
-        self.dimension_fields = [f for f, t in field_info.items() if t not in ['int', 'float', 'numeric']]
-        self._align_columns()
-        self.compare_results = {}
-
-    def _align_columns(self):
-        for col in self.field_info:
-            if self.old_df is not None and col not in self.old_df.columns: self.old_df[col] = np.nan
-            if self.new_df is not None and col not in self.new_df.columns: self.new_df[col] = np.nan
-        common = (set(self.old_df.columns) if self.old_df is not None else set()) & (set(self.new_df.columns) if self.new_df is not None else set())
-        self.numeric_fields = [f for f in self.numeric_fields if f in common]
-        self.dimension_fields = [f for f in self.dimension_fields if f in common]
-
-    def _load_spark_data(self, sql: str):
-        try:
-            spark_df = spark.sql(sql).select(*list(self.field_info.keys()))
-            df = spark_df.toPandas()
-            if df is None:
-                df = pd.DataFrame()
-            for field, dtype in self.field_info.items():
-                try:
-                    if dtype == 'int': df[field] = pd.to_numeric(df[field], downcast='integer', errors='coerce')
-                    elif dtype == 'float': df[field] = pd.to_numeric(df[field], downcast='float', errors='coerce')
-                    elif dtype == 'str': df[field] = df[field].astype(str).replace('nan', '').replace('None', '')
-                except: pass
-            df = df.dropna(how='all')
-            for col in self.field_info:
-                if col not in df.columns: df[col] = np.nan
-            return df
-        except Exception as e:
-            raise RuntimeError(f"执行Spark SQL失败: {str(e)}")
-
-    def compare_row_count(self):
-        old_count = len(self.old_df) if self.old_df is not None else 0
-        new_count = len(self.new_df) if self.new_df is not None else 0
-        self.compare_results['数据量对比'] = {'老表数据量': old_count, '新表数据量': new_count, '是否一致': old_count == new_count}
-        return old_count == new_count
-
-    def compare_numeric_sum(self):
-        sum_results = {}
-        for field in self.numeric_fields:
-            if field not in self.old_df.columns or field not in self.new_df.columns: continue
-            old_sum, new_sum = self.old_df[field].sum(), self.new_df[field].sum()
-            sum_results[field] = {'老表sum值': old_sum, '新表sum值': new_sum, '是否一致': bool(np.isclose(old_sum, new_sum, rtol=1e-09))}
-        self.compare_results['数值型字段sum对比'] = sum_results
-        return sum_results
-
-    def compare_group_by_dimension(self, group_fields=None):
-        group_fields = group_fields or self.dimension_fields
-        if not group_fields: return
-        per_field_results = {}
-        for gf in group_fields:
-            if gf not in self.old_df.columns or gf not in self.new_df.columns: continue
-            old_g = self.old_df.groupby(gf)[self.numeric_fields].sum().reset_index() if self.numeric_fields else self.old_df.groupby(gf).size().reset_index(name='cnt')
-            new_g = self.new_df.groupby(gf)[self.numeric_fields].sum().reset_index() if self.numeric_fields else self.new_df.groupby(gf).size().reset_index(name='cnt')
-            num_cols = self.numeric_fields if self.numeric_fields else ['cnt']
-            merged = old_g.merge(new_g, on=gf, how='outer', suffixes=('_old', '_new'))
-            for c in merged.select_dtypes(include=[np.number]).columns: merged[c] = merged[c].fillna(0)
-            is_ok = all(np.isclose(merged[f+'_old'], merged[f+'_new'], rtol=1e-09).all() for f in num_cols) if self.numeric_fields else (merged['cnt_old']==merged['cnt_new']).all()
-            per_field_results[gf] = {'是否一致': bool(is_ok), '分组字段': gf}
-        self.compare_results['维度分组对比'] = {'各维度分组对比': per_field_results}
-        return per_field_results
-
-    def compare_detail_data(self):
-        join_keys = [f for f in self.dimension_fields if f in self.old_df.columns and f in self.new_df.columns]
-        if not join_keys:
-            self.compare_results['全字段明细对比'] = {'是否一致': False, '说明': '无可用维度字段做join'}
-            return False
-        merged = self.old_df.merge(self.new_df, on=join_keys, how='outer', suffixes=('_old', '_new'), indicator=True)
-        only_old = (merged['_merge'] == 'left_only').sum()
-        only_new = (merged['_merge'] == 'right_only').sum()
-        both = (merged['_merge'] == 'both').sum()
-        has_orphan = only_old > 0 or only_new > 0
-        merged_both = merged[merged['_merge'] == 'both']
-        num_ok = True
-        if len(merged_both) > 0 and self.numeric_fields:
-            for f in self.numeric_fields:
-                ocol, ncol = f+'_old', f+'_new'
-                if ocol in merged_both.columns and ncol in merged_both.columns:
-                    mask = np.isclose(merged_both[ocol].fillna(0), merged_both[ncol].fillna(0), rtol=1e-09)
-                    if not mask.all(): num_ok = False
-        is_consistent = not has_orphan and num_ok
-        self.compare_results['全字段明细对比'] = {
-            '是否一致': is_consistent,
-            'join说明': f'按{join_keys}做full outer join',
-            '仅老表有行数': int(only_old), '仅新表有行数': int(only_new), '两表都有行数': int(both)
-        }
-        return is_consistent
-
-    def run_all_comparisons(self, group_fields=None, sample_ratio=None):
-        self.compare_results['查询SQL'] = {'老表SQL': self.old_table_sql, '新表SQL': self.new_table_sql}
-        self.compare_row_count()
-        self.compare_numeric_sum()
-        self.compare_group_by_dimension(group_fields)
-        self.compare_detail_data()
-        all_ok = (
-            self.compare_results['数据量对比']['是否一致'] and
-            all(r.get('是否一致') for r in (self.compare_results.get('数值型字段sum对比') or {}).values() if isinstance(r, dict)) and
-            all(p.get('是否一致') for p in (self.compare_results.get('维度分组对比',{}).get('各维度分组对比',{}) or {}).values()) and
-            self.compare_results.get('全字段明细对比',{}).get('是否一致', True)
-        )
-        self.compare_results['整体结论'] = {'所有维度是否一致': all_ok}
-        return self.compare_results
-
-    def print_results(self):
-        print("="*60)
-        print("新老表数据对比结果")
-        print("="*60)
-        for k, v in self.compare_results.items():
-            if k == '查询SQL': continue
-            print(f"\\n【{k}】")
-            if isinstance(v, dict):
-                for kk, vv in v.items():
-                    if isinstance(vv, dict):
-                        print(f"  {kk}: {vv}")
-                    else:
-                        print(f"  {kk}: {vv}")
-            else:
-                print(v)
-        print("="*60)
-
-def main():
-    OLD_TABLE_NAME = "${d.oldTable.replace(/\\/g,'\\\\').replace(/"/g,'\\"')}"
-    NEW_TABLE_NAME = "${d.newTable.replace(/\\/g,'\\\\').replace(/"/g,'\\"')}"
-    OLD_TABLE_SQL = """
-${d.oldSql.split('\n').map(l=>'        '+l.replace(/\\/g,'\\\\').replace(/`/g,'\\`')).join('\n')}
+            const selectLines=d.fields.map((f,i)=>(i===0?'        SELECT ':'                ')+f.name+(i<d.fields.length-1?',':'')).join('\\n');
+            const oldWhereClause=d.oldWhere?('WHERE '+d.oldWhere):'WHERE 1=1';
+            const newWhereClause=d.newWhere?('WHERE '+d.newWhere):'WHERE 1=1';
+            const configBlock=`    # ====================== 用户配置区 ======================
+    # 1. 新老表名称（仅用于展示）
+    OLD_TABLE_NAME = "${d.oldTable.replace(/\\/g,'\\\\').replace(/"/g,'\\"')}"   # 老表名
+    NEW_TABLE_NAME = "${d.newTable.replace(/\\/g,'\\\\').replace(/"/g,'\\"')}"   # 新表名
+    
+    # 2. 新老表查询SQL（核心：确保查询字段和顺序与FIELD_INFO一致）
+    # 建议添加where条件限制数据量，避免全表扫描
+    OLD_TABLE_SQL = f"""
+${selectLines}
+        FROM {OLD_TABLE_NAME}
+        ${oldWhereClause}  -- 根据实际业务添加筛选条件
     """
-    NEW_TABLE_SQL = """
-${d.newSql.split('\n').map(l=>'        '+l.replace(/\\/g,'\\\\').replace(/`/g,'\\`')).join('\n')}
+    
+    NEW_TABLE_SQL = f"""
+${selectLines}
+        FROM {NEW_TABLE_NAME}
+        ${newWhereClause}  -- 保持和老表相同的筛选条件
     """
+    
+    # 3. 配置字段信息（字段名: 字段类型）
+    # 字段类型：'str'（维度）、'int'/'float'（数值）
     FIELD_INFO = {
 ${d.fieldInfoStr}
     }
-    GROUP_FIELDS = None
-    SAMPLE_RATIO = None
-
-    print(f"正在对比Spark SQL表：老表[{OLD_TABLE_NAME}] vs 新表[{NEW_TABLE_NAME}]")
-    print("-"*60)
-    try:
-        comparator = SparkTableComparator(old_table_sql=OLD_TABLE_SQL, new_table_sql=NEW_TABLE_SQL, field_info=FIELD_INFO)
-        results = comparator.run_all_comparisons(group_fields=GROUP_FIELDS, sample_ratio=SAMPLE_RATIO)
-        comparator.print_results()
-    except Exception as e:
-        print(f"程序执行失败: {str(e)}")
-        sys.exit(1)
-
-if __name__ == "__main__":
-    main()
-`;
+    
+    # 4. 配置分组对比的维度字段（可选，None表示用所有str维度字段）
+    GROUP_FIELDS = None  # 或指定如 ['order_create_date', 'zdm_id']，None则用全部str字段
+    
+    # 5. 明细对比采样比例（数据量大时建议设置，如0.1表示10%，None表示全量）
+    SAMPLE_RATIO = None  # 千万级以上数据建议设为0.01-0.1
+    # =======================================================`;
+            const code=PYTHON_TEMPLATE.replace('__CONFIG_BLOCK__', configBlock);
             const el=document.getElementById('outputPython');
             el.textContent=code;
             el.dataset.code=code;
@@ -481,3 +945,5 @@ if __name__ == "__main__":
     </script>
 </body>
 </html>
+
+
