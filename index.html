@@ -141,6 +141,16 @@
     <div class="card">
         <h2>3. 字段名称与类型 <span style="color:#ff3b30;font-size:11px;">必填</span></h2>
         <div class="hint">str=字符串/维度，int/float=数值型。生成代码将实现：①数据条数 ②数值sum ③按str字段group by汇总 ④全str字段full outer join后sum</div>
+        <div style="margin-bottom:10px;">
+            <button type="button" class="btn btn-secondary" onclick="toggleBatchImport()">批量导入</button>
+            <div id="batchImportBox" style="display:none; margin-top:10px;">
+                <textarea id="batchImportText" placeholder="每行一个字段，格式：字段名,类型 或 字段名 类型&#10;例如：order_create_date,str&#10;pro_gmv,float" style="height:120px; font-family:monospace; font-size:13px;"></textarea>
+                <div style="margin-top:8px;">
+                    <button type="button" class="btn btn-primary" onclick="doBatchImport()">导入并替换</button>
+                    <button type="button" class="btn btn-secondary" onclick="doBatchImport(true)">导入并追加</button>
+                </div>
+            </div>
+        </div>
         <div id="fieldList"></div>
         <button type="button" class="btn btn-secondary" onclick="addField()" style="margin-top:10px;">+ 添加字段</button>
     </div>
@@ -189,6 +199,34 @@
         }
         function addField(){ const d=getStored(); d.push(['','str']); saveFields(d); renderFields(); }
         function removeField(idx){ const d=getStored(); d.splice(idx,1); saveFields(d); renderFields(); }
+        function toggleBatchImport(){
+            const box=document.getElementById('batchImportBox');
+            box.style.display=box.style.display==='none'?'block':'none';
+        }
+        function doBatchImport(append){
+            const raw=document.getElementById('batchImportText').value.trim();
+            if(!raw){ showToast('请输入要导入的内容',true); return; }
+            const lines=raw.split(/\r?\n/).map(s=>s.trim()).filter(Boolean);
+            const parsed=[];
+            const validTypes=['str','int','float'];
+            for(const line of lines){
+                const sepIdx=line.search(/[\t,，]/);
+                let name,type;
+                if(sepIdx>=0){
+                    name=line.substring(0,sepIdx).trim();
+                    type=(line.substring(sepIdx+1).trim().toLowerCase()||'str').replace('numeric','float').replace('string','str');
+                }else{
+                    name=line; type='str';
+                }
+                if(name && validTypes.includes(type)) parsed.push([name,type]);
+            }
+            if(parsed.length===0){ showToast('未解析到有效字段，请检查格式',true); return; }
+            const d=append ? [...getStored(),...parsed] : parsed;
+            saveFields(d);
+            renderFields();
+            document.getElementById('batchImportText').value='';
+            showToast('已导入 '+parsed.length+' 个字段');
+        }
         function getFieldInfo(){
             const rows=document.querySelectorAll('#fieldList .field-row');
             const r=[]; rows.forEach(el=>{
@@ -230,9 +268,21 @@ spark = SparkSession \\
 
 import pandas as pd
 import numpy as np
+from decimal import Decimal, ROUND_HALF_UP
 from typing import Dict, List, Tuple
 import warnings
 import sys
+
+def _round_half_up(x, decimals=2):
+    """四舍五入保留指定位数小数（ROUND_HALF_UP）。用 format 归一化浮点，消除 19.814999999998 与 19.815 的表示差异"""
+    if pd.isna(x):
+        return x
+    try:
+        # format(.15g) 输出最短可往返的字符串，使 19.814999999998 与 19.815 都变为 '19.815'
+        s = format(float(x), '.15g')
+        return float(Decimal(s).quantize(Decimal(10) ** -decimals, rounding=ROUND_HALF_UP))
+    except Exception:
+        return x
 # 假设你的环境已提前初始化好SparkSession，无需额外导入和配置
 # from pyspark.sql import SparkSession
 # spark = SparkSession.builder.enableHiveSupport().getOrCreate()  # 环境已存在则注释
@@ -353,8 +403,8 @@ class SparkTableComparator:
                 continue
             old_sum = self.old_df[field].sum()
             new_sum = self.new_df[field].sum()
-            # 处理浮点数精度问题
-            is_consistent = np.isclose(old_sum, new_sum, rtol=1e-09)
+            # 四舍五入保留两位小数后对比
+            is_consistent = _round_half_up(old_sum, 2) == _round_half_up(new_sum, 2)
             
             sum_results[field] = {
                 '老表sum值': old_sum,
@@ -364,6 +414,20 @@ class SparkTableComparator:
         
         self.compare_results['数值型字段sum对比'] = sum_results
         return {f: sum_results[f]['是否一致'] for f in self.numeric_fields if isinstance(sum_results.get(f), dict) and sum_results[f].get('是否一致') is not None}
+
+    def _norm_str_for_join(self, val):
+        """将 str 字段的 0、空、null 等统一为 '0'，用于关联对比"""
+        if pd.isna(val):
+            return '0'
+        s = str(val).strip()
+        if s.lower() in ('', 'null', 'none', 'nan', '0'):
+            return '0'
+        try:
+            if float(val) == 0:
+                return '0'
+        except (ValueError, TypeError):
+            pass
+        return s
 
     def _is_empty_null_zero(self, val) -> bool:
         """判断枚举值是否为空、null、0"""
@@ -390,13 +454,13 @@ class SparkTableComparator:
             for label, mdf in [('空/null/0', merged_empty), ('非空/null/0', merged_valid)]:
                 old_vals = {f: mdf[f'{f}_old'].sum() for f in num_fields}
                 new_vals = {f: mdf[f'{f}_new'].sum() for f in num_fields}
-                is_ok = all(np.isclose(old_vals[f], new_vals[f], rtol=1e-09) for f in num_fields)
+                is_ok = all(_round_half_up(old_vals[f], 2) == _round_half_up(new_vals[f], 2) for f in num_fields)
                 result[label] = {'老表': old_vals, '新表': new_vals, '是否一致': is_ok}
         else:
             for label, mdf in [('空/null/0', merged_empty), ('非空/null/0', merged_valid)]:
                 old_cnt = mdf['cnt_x'].sum()
                 new_cnt = mdf['cnt_y'].sum()
-                is_ok = np.isclose(old_cnt, new_cnt, rtol=1e-09)
+                is_ok = _round_half_up(old_cnt, 2) == _round_half_up(new_cnt, 2)
                 result[label] = {'老表': {'cnt': old_cnt}, '新表': {'cnt': new_cnt}, '是否一致': is_ok}
         return result
 
@@ -437,8 +501,12 @@ class SparkTableComparator:
                 continue
             try:
                 if not self.numeric_fields:
-                    old_group = self.old_df.groupby(gf).size().reset_index(name='cnt')
-                    new_group = self.new_df.groupby(gf).size().reset_index(name='cnt')
+                    old_tmp = self.old_df.copy()
+                    old_tmp[gf] = old_tmp[gf].apply(self._norm_str_for_join)
+                    new_tmp = self.new_df.copy()
+                    new_tmp[gf] = new_tmp[gf].apply(self._norm_str_for_join)
+                    old_group = old_tmp.groupby(gf).size().reset_index(name='cnt')
+                    new_group = new_tmp.groupby(gf).size().reset_index(name='cnt')
                     merged = old_group.merge(new_group, on=gf, how='outer')
                     for col in merged.select_dtypes(include=[np.number]).columns:
                         merged[col] = merged[col].fillna(0)
@@ -454,8 +522,12 @@ class SparkTableComparator:
                         empty_valid_summary = self._get_empty_valid_summary(merged, gf, [])
                     per_field_results[gf] = {'分组字段': [gf], '汇总字段': ['cnt'], '不一致的数值字段': [], '是否一致': bool(is_consistent), '枚举值数量': int(n_enum), '差异详情': diff_detail if diff_detail else '无差异', '空与非空汇总对比': empty_valid_summary}
                 else:
-                    old_group = self.old_df.groupby(gf)[self.numeric_fields].sum().reset_index()
-                    new_group = self.new_df.groupby(gf)[self.numeric_fields].sum().reset_index()
+                    old_tmp = self.old_df.copy()
+                    old_tmp[gf] = old_tmp[gf].apply(self._norm_str_for_join)
+                    new_tmp = self.new_df.copy()
+                    new_tmp[gf] = new_tmp[gf].apply(self._norm_str_for_join)
+                    old_group = old_tmp.groupby(gf)[self.numeric_fields].sum().reset_index()
+                    new_group = new_tmp.groupby(gf)[self.numeric_fields].sum().reset_index()
                     merged = old_group.merge(new_group, on=gf, suffixes=('_old', '_new'), how='outer')
                     for col in merged.select_dtypes(include=[np.number]).columns:
                         merged[col] = merged[col].fillna(0)
@@ -463,7 +535,7 @@ class SparkTableComparator:
                     for num_field in self.numeric_fields:
                         old_col = f'{num_field}_old'
                         new_col = f'{num_field}_new'
-                        merged[f'{num_field}_一致'] = np.isclose(merged[old_col], merged[new_col], rtol=1e-09)
+                        merged[f'{num_field}_一致'] = merged[old_col].fillna(0).apply(lambda x: _round_half_up(x, 2)) == merged[new_col].fillna(0).apply(lambda x: _round_half_up(x, 2))
                         if not merged[f'{num_field}_一致'].all():
                             inconsistent_fields.append(num_field)
                     is_consistent = len(inconsistent_fields) == 0
@@ -498,6 +570,9 @@ class SparkTableComparator:
         if not join_keys:
             self.compare_results['全字段明细对比'] = {'是否一致': False, '说明': '无可用维度字段做 join，无法对比', '采样比例': sample_ratio if sample_ratio else '全量'}
             return False
+        for k in join_keys:
+            old_detail[k] = old_detail[k].apply(self._norm_str_for_join)
+            new_detail[k] = new_detail[k].apply(self._norm_str_for_join)
         merged = old_detail.merge(new_detail, on=join_keys, how='outer', suffixes=('_old', '_new'), indicator=True)
         only_old = (merged['_merge'] == 'left_only').sum()
         only_new = (merged['_merge'] == 'right_only').sum()
@@ -513,7 +588,7 @@ class SparkTableComparator:
                 old_col = f'{num_field}_old'
                 new_col = f'{num_field}_new'
                 if old_col in merged_both.columns and new_col in merged_both.columns:
-                    mask = np.isclose(merged_both[old_col], merged_both[new_col], rtol=1e-09)
+                    mask = merged_both[old_col].fillna(0).apply(lambda x: _round_half_up(x, 2)) == merged_both[new_col].fillna(0).apply(lambda x: _round_half_up(x, 2))
                     if not mask.all():
                         num_consistent = False
                         diff_idx = merged_both.index[~mask]
@@ -876,57 +951,126 @@ ${d.fieldInfoStr}
 
         function generateSql(){
             const d=getFormData(); if(!d) return;
+            const normStr=function(f){ return "COALESCE(NULLIF(NULLIF(TRIM(CAST("+f+" AS STRING)), ''), '0'), '0')"; };
             let sql='-- 表验收自动化 SQL - 由网页生成\n';
             sql+='-- 老表: '+d.oldTable+'\n';
             sql+='-- 新表: '+d.newTable+'\n\n';
 
             sql+='-- ========== 1. 新老表数据条数 ==========\n';
-            sql+='SELECT \'老表\' AS table_type, COUNT(*) AS cnt FROM '+d.oldTable+d.oldWhereClause+'\n';
-            sql+='UNION ALL\n';
-            sql+='SELECT \'新表\' AS table_type, COUNT(*) AS cnt FROM '+d.newTable+d.newWhereClause+'\n\n';
+            sql+='SELECT \'老表\' AS table_type,\n';
+            sql+='       COUNT(*) AS cnt\n';
+            sql+='FROM '+d.oldTable+'\n';
+            if(d.oldWhere) sql+='WHERE '+d.oldWhere+'\n';
+            sql+='\nUNION ALL\n\n';
+            sql+='SELECT \'新表\' AS table_type,\n';
+            sql+='       COUNT(*) AS cnt\n';
+            sql+='FROM '+d.newTable+'\n';
+            if(d.newWhere) sql+='WHERE '+d.newWhere+'\n';
+            sql+=';\n\n';
 
             if(d.numFields.length>0){
                 sql+='-- ========== 2. 新老表数值型字段 sum 值 ==========\n';
-                const sumCols=d.numFields.map(f=>'SUM('+f+') AS '+f+'_sum').join(', ');
-                sql+='SELECT \'老表\' AS table_type, '+sumCols+' FROM '+d.oldTable+d.oldWhereClause+'\n';
-                sql+='UNION ALL\n';
-                sql+='SELECT \'新表\' AS table_type, '+sumCols+' FROM '+d.newTable+d.newWhereClause+'\n\n';
+                const sumCols=d.numFields.map(f=>'       SUM('+f+') AS '+f+'_sum').join(',\n');
+                sql+='SELECT \'老表\' AS table_type,\n';
+                sql+=sumCols+'\n';
+                sql+='FROM '+d.oldTable+'\n';
+                if(d.oldWhere) sql+='WHERE '+d.oldWhere+'\n';
+                sql+='\nUNION ALL\n\n';
+                sql+='SELECT \'新表\' AS table_type,\n';
+                sql+=sumCols+'\n';
+                sql+='FROM '+d.newTable+'\n';
+                if(d.newWhere) sql+='WHERE '+d.newWhere+'\n';
+                sql+=';\n\n';
             }
 
             if(d.strFields.length>0){
-                sql+='-- ========== 3. 按字符串字段 group by 汇总数值型字段 ==========\n';
+                sql+='-- ========== 3. 按字符串字段 GROUP BY 汇总数值型字段 ==========\n';
+                sql+='-- 说明：UNION ALL 类型不做空/0/null 转化，保持原始分组\n';
                 for(let i=0;i<d.strFields.length;i++){
                     const gf=d.strFields[i];
-                    const aggCols=d.numFields.length>0 ? d.numFields.map(f=>'SUM('+f+') AS '+f+'_sum').join(', ') : 'COUNT(*) AS cnt';
+                    const aggCols=d.numFields.length>0 ? d.numFields.map(f=>'       SUM('+f+') AS '+f+'_sum').join(',\n') : '       COUNT(*) AS cnt';
                     sql+='-- 按 ['+gf+'] 分组\n';
-                    sql+='SELECT \'老表\' AS table_type, '+gf+', '+aggCols+' FROM '+d.oldTable+d.oldWhereClause+' GROUP BY '+gf+'\n';
-                    sql+='UNION ALL\n';
-                    sql+='SELECT \'新表\' AS table_type, '+gf+', '+aggCols+' FROM '+d.newTable+d.newWhereClause+' GROUP BY '+gf+'\n\n';
+                    sql+='SELECT \'老表\' AS table_type,\n';
+                    sql+='       '+gf+',\n';
+                    sql+=aggCols+'\n';
+                    sql+='FROM '+d.oldTable+'\n';
+                    if(d.oldWhere) sql+='WHERE '+d.oldWhere+'\n';
+                    sql+='GROUP BY '+gf+'\n\n';
+                    sql+='UNION ALL\n\n';
+                    sql+='SELECT \'新表\' AS table_type,\n';
+                    sql+='       '+gf+',\n';
+                    sql+=aggCols+'\n';
+                    sql+='FROM '+d.newTable+'\n';
+                    if(d.newWhere) sql+='WHERE '+d.newWhere+'\n';
+                    sql+='GROUP BY '+gf+'\n;\n\n';
                 }
             }
 
             if(d.strFields.length>0){
-                sql+='-- ========== 4. 全字符串字段 full outer join 后 sum 数值型字段 ==========\n';
-                const joinCond=d.strFields.map(f=>'o.'+f+' = n.'+f).join(' AND ');
+                sql+='-- ========== 4. 全字符串字段 FULL OUTER JOIN 后 sum 数值型字段 ==========\n';
+                sql+='-- 说明：str 字段的 0、空、null 统一按 \'0\' 处理后关联\n';
+                const joinCond=d.strFields.map(f=>'    '+normStr('o.'+f)+' = '+normStr('n.'+f)).join('\n    AND ');
                 const sumSelect=d.numFields.length>0
-                    ? d.numFields.flatMap(f=>['SUM(old_'+f+') AS old_'+f+'_total','SUM(new_'+f+') AS new_'+f+'_total']).join(',\n       ')
-                    : 'COUNT(*) AS total_cnt';
+                    ? d.numFields.flatMap(f=>['    SUM(old_'+f+') AS old_'+f+'_total','    SUM(new_'+f+') AS new_'+f+'_total']).join(',\n')
+                    : '    COUNT(*) AS total_cnt';
+                const selectFields=d.allFields.map(f=>'    '+f).join(',\n');
+                const coalesceStr=d.strFields.map(f=>'    '+normStr('COALESCE(o.'+f+', n.'+f+')')+' AS '+f).join(',\n');
+                const coalesceNum=d.numFields.length>0 ? ',\n'+d.numFields.map(f=>'    COALESCE(o.'+f+', 0) AS old_'+f+',\n    COALESCE(n.'+f+', 0) AS new_'+f).join(',\n') : '';
                 sql+='WITH old_data AS (\n';
-                sql+='    SELECT '+d.allFields.join(', ')+' FROM '+d.oldTable+d.oldWhereClause+'\n';
+                sql+='    SELECT\n';
+                sql+=selectFields+'\n';
+                sql+='    FROM '+d.oldTable+'\n';
+                if(d.oldWhere) sql+='    WHERE '+d.oldWhere+'\n';
                 sql+='),\n';
                 sql+='new_data AS (\n';
-                sql+='    SELECT '+d.allFields.join(', ')+' FROM '+d.newTable+d.newWhereClause+'\n';
+                sql+='    SELECT\n';
+                sql+=selectFields+'\n';
+                sql+='    FROM '+d.newTable+'\n';
+                if(d.newWhere) sql+='    WHERE '+d.newWhere+'\n';
                 sql+='),\n';
                 sql+='joined AS (\n';
-                sql+='    SELECT \n';
-                sql+=d.strFields.map(f=>'        COALESCE(o.'+f+', n.'+f+') AS '+f).join(',\n');
-                if(d.numFields.length>0){
-                    sql+=',\n'+d.numFields.map(f=>'        COALESCE(o.'+f+', 0) AS old_'+f+',\n        COALESCE(n.'+f+', 0) AS new_'+f).join(',\n');
-                }
-                sql+='\n    FROM old_data o\n';
-                sql+='    FULL OUTER JOIN new_data n ON '+joinCond+'\n';
+                sql+='    SELECT\n';
+                sql+=coalesceStr+coalesceNum+'\n';
+                sql+='    FROM old_data o\n';
+                sql+='    FULL OUTER JOIN new_data n\n';
+                sql+='    ON\n';
+                sql+=joinCond+'\n';
                 sql+=')\n';
-                sql+='SELECT '+sumSelect+' FROM joined;\n';
+                sql+='SELECT\n';
+                sql+=sumSelect+'\n';
+                sql+='FROM joined;\n\n';
+            }
+
+            if(d.strFields.length>0 && d.numFields.length>0){
+                sql+='-- ========== 5. 按单个 str 字段 FULL OUTER JOIN 后数值型 sum 差异明细 ==========\n';
+                sql+='-- 输出：新老表按某 str 分组后，任一数值型字段 sum 不一致的明细行\n';
+                sql+='-- 说明：str 字段的 0、空、null 统一按 \'0\' 处理后关联；数值比较用 ROUND(ROUND(...,5),2) 先归一化再四舍五入，消除 19.814999998 与 19.815 的浮点差异\n\n';
+                for(let i=0;i<d.strFields.length;i++){
+                    const gf=d.strFields[i];
+                    const gfNorm=normStr(gf);
+                    const sumCols=d.numFields.map(f=>'           SUM('+f+') AS '+f+'_sum').join(',\n');
+                    const whereDiff=d.numFields.map(f=>'    ROUND(ROUND(COALESCE(t1.'+f+'_sum, 0), 5), 2) <> ROUND(ROUND(COALESCE(t2.'+f+'_sum, 0), 5), 2)').join('\n    OR ');
+                    sql+='-- 按 ['+gf+'] 分组的数值差异明细\n';
+                    sql+='SELECT t1.*, t2.*\n';
+                    sql+='FROM (\n';
+                    sql+='    SELECT \'老表\' AS table_type,\n';
+                    sql+='           '+gfNorm+' AS '+gf+',\n';
+                    sql+=sumCols+'\n';
+                    sql+='    FROM '+d.oldTable+'\n';
+                    if(d.oldWhere) sql+='    WHERE '+d.oldWhere+'\n';
+                    sql+='    GROUP BY '+gfNorm+'\n';
+                    sql+=') t1\n';
+                    sql+='FULL OUTER JOIN (\n';
+                    sql+='    SELECT \'新表\' AS table_type,\n';
+                    sql+='           '+gfNorm+' AS '+gf+',\n';
+                    sql+=sumCols+'\n';
+                    sql+='    FROM '+d.newTable+'\n';
+                    if(d.newWhere) sql+='    WHERE '+d.newWhere+'\n';
+                    sql+='    GROUP BY '+gfNorm+'\n';
+                    sql+=') t2 ON t1.'+gf+' = t2.'+gf+'\n';
+                    sql+='WHERE\n';
+                    sql+=whereDiff+';\n\n';
+                }
             }
 
             const el=document.getElementById('outputSql');
@@ -945,4 +1089,5 @@ ${d.fieldInfoStr}
     </script>
 </body>
 </html>
+
 
