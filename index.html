@@ -271,7 +271,9 @@ class SparkTableComparator:
     def _load_spark_data(self, sql: str):
         try:
             spark_df = spark.sql(sql).select(*list(self.field_info.keys()))
-            df = spark_df.toPandas() or pd.DataFrame()
+            df = spark_df.toPandas()
+            if df is None:
+                df = pd.DataFrame()
             for field, dtype in self.field_info.items():
                 try:
                     if dtype == 'int': df[field] = pd.to_numeric(df[field], downcast='integer', errors='coerce')
