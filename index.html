@@ -95,6 +95,8 @@
         .field-row:last-child { border-bottom: none; }
         .field-row input:first-child { flex: 2; min-width: 0; }
         .field-row select { flex: 1; max-width: 110px; min-height: 44px; }
+        .pk-check { display: flex; align-items: center; gap: 4px; font-size: 12px; font-weight: 500; color: #2e7d32; cursor: pointer; white-space: nowrap; }
+        .pk-check input { width: auto; cursor: pointer; }
         .btn {
             padding: 11px 22px;
             border: none;
@@ -208,11 +210,11 @@
 
     <div class="card">
         <h2>3. 字段名称与类型 <span class="required">必填</span></h2>
-        <div class="hint">str=字符串/维度，int/float=数值型。生成代码将实现：①数据条数 ②数值sum ③按str字段group by汇总 ④全str字段full outer join后sum</div>
+        <div class="hint">str=字符串/维度，int/float=数值型。str 可勾选「主键」用于 distinct 去重对比。生成代码将实现：①数据条数 ②主键 distinct/未去重 ③数值sum ④按str分组 ⑤full outer join</div>
         <div style="margin-bottom:10px;">
             <button type="button" class="btn btn-secondary" onclick="toggleBatchImport()">批量导入</button>
             <div id="batchImportBox" style="display:none; margin-top:10px;">
-                <textarea id="batchImportText" placeholder="每行一个字段，格式：字段名,类型 或 字段名 类型&#10;例如：order_create_date,str&#10;pro_gmv,float"></textarea>
+                <textarea id="batchImportText" placeholder="每行一个字段，格式：字段名,类型 或 字段名,类型,主键&#10;例如：order_create_date,str&#10;zdm_id,str,pk&#10;pro_gmv,float"></textarea>
                 <div style="margin-top:8px;">
                     <button type="button" class="btn btn-primary" onclick="doBatchImport()">导入并替换</button>
                     <button type="button" class="btn btn-secondary" onclick="doBatchImport(true)">导入并追加</button>
@@ -243,29 +245,52 @@
 
     <script>
         const defaultFields = [
-            ['order_create_time','str'],['order_create_date','str'],['zdm_id','str'],['pro_id','str'],
-            ['mall_name','str'],['mall_id','str'],['pro_link','str'],['pro_gmv','float'],
-            ['pro_cps','float'],['sku_order','float'],['ascribe_article_id','str'],['direct_article_id','str'],
-            ['clean_link','str'],['marketing_id','str']
+            ['order_create_time','str',false],['order_create_date','str',false],['zdm_id','str',true],['pro_id','str',true],
+            ['mall_name','str',false],['mall_id','str',false],['pro_link','str',false],['pro_gmv','float'],
+            ['pro_cps','float'],['sku_order','float'],['ascribe_article_id','str',false],['direct_article_id','str',false],
+            ['clean_link','str',false],['marketing_id','str',false]
         ];
-        function getStored(){ try{ const s=localStorage.getItem('tv_fields'); return s?JSON.parse(s):defaultFields; }catch(_){ return defaultFields; } }
+        function getStored(){
+            try{
+                const s=localStorage.getItem('tv_fields');
+                if(!s) return defaultFields;
+                const d=JSON.parse(s);
+                return d.map(f=>{
+                    if(f.length>=3) return f;
+                    return f[1]==='str' ? [f[0],f[1],false] : f;
+                });
+            }catch(_){ return defaultFields; }
+        }
         function saveFields(d){ localStorage.setItem('tv_fields',JSON.stringify(d)); }
+        function updateFieldPk(idx,checked){
+            const d=getStored();
+            if(d[idx]&&d[idx][1]==='str'){ d[idx][2]=checked; saveFields(d); }
+        }
         function renderFields(){
             const list=document.getElementById('fieldList');
             const data=getStored();
             list.innerHTML=data.map((f,i)=>`
                 <div class="field-row">
                     <input type="text" placeholder="字段名" value="${(f[0]||'').replace(/"/g,'&quot;')}">
-                    <select>
+                    <select onchange="onTypeChange(${i},this.value)">
                         <option value="str" ${f[1]==='str'?'selected':''}>str</option>
                         <option value="int" ${f[1]==='int'?'selected':''}>int</option>
                         <option value="float" ${f[1]==='float'?'selected':''}>float</option>
                     </select>
+                    ${f[1]==='str'?`<label class="pk-check"><input type="checkbox" ${f[2]?'checked':''} onchange="updateFieldPk(${i},this.checked)">主键</label>`:''}
                     <button type="button" class="btn btn-danger" onclick="removeField(${i})">删除</button>
                 </div>
             `).join('');
         }
-        function addField(){ const d=getStored(); d.push(['','str']); saveFields(d); renderFields(); }
+        function onTypeChange(idx,val){
+            const d=getStored();
+            d[idx][1]=val;
+            if(val!=='str') d[idx][2]=false;
+            else if(d[idx].length<3) d[idx][2]=false;
+            saveFields(d);
+            renderFields();
+        }
+        function addField(){ const d=getStored(); d.push(['','str',false]); saveFields(d); renderFields(); }
         function removeField(idx){ const d=getStored(); d.splice(idx,1); saveFields(d); renderFields(); }
         function toggleBatchImport(){
             const box=document.getElementById('batchImportBox');
@@ -286,7 +311,10 @@
                 }else{
                     name=line; type='str';
                 }
-                if(name && validTypes.includes(type)) parsed.push([name,type]);
+                if(name && validTypes.includes(type)){
+                    const pk=parts.length>=3 && /^(1|true|pk|主键|yes)$/i.test(String(parts[2]).trim());
+                    parsed.push(type==='str' ? [name,type,pk] : [name,type]);
+                }
             }
             if(parsed.length===0){ showToast('未解析到有效字段，请检查格式',true); return; }
             const d=append ? [...getStored(),...parsed] : parsed;
@@ -300,7 +328,8 @@
             const r=[]; rows.forEach(el=>{
                 const n=el.querySelector('input').value.trim();
                 const t=el.querySelector('select').value;
-                if(n) r.push({name:n,type:t});
+                const pk=el.querySelector('.pk-check input');
+                if(n) r.push({name:n,type:t,pk:pk?pk.checked:false});
             });
             return r;
         }
@@ -363,16 +392,18 @@ class SparkTableComparator:
     支持：数据量对比、数值字段sum对比、维度分组对比、全字段明细对比
     """
     def __init__(self, old_table_sql: str, new_table_sql: str, 
-                 field_info: Dict[str, str]):
+                 field_info: Dict[str, str], primary_key_fields: List[str] = None):
         """
         初始化对比工具（从Spark SQL拉取数据）
         :param old_table_sql: 老表查询SQL
         :param new_table_sql: 新表查询SQL
         :param field_info: 字段信息字典，格式：{字段名: 字段类型}
+        :param primary_key_fields: 主键字段列表（str类型），用于 distinct 去重对比
         """
         self.old_table_sql = old_table_sql
         self.new_table_sql = new_table_sql
         self.field_info = field_info
+        self.primary_key_fields = primary_key_fields or []
         
         # 从Spark SQL加载数据（转为Pandas DataFrame）
         self.old_df = self._load_spark_data(old_table_sql)
@@ -453,6 +484,35 @@ class SparkTableComparator:
             '是否一致': is_consistent
         }
         return is_consistent
+
+    def compare_primary_key_distinct(self) -> Dict:
+        """新老表分别对主键进行 distinct 去重和未去重字段对比"""
+        result = {}
+        pk_cols = [f for f in self.primary_key_fields if f in (self.old_df.columns if self.old_df is not None else []) and f in (self.new_df.columns if self.new_df is not None else [])]
+        if not pk_cols:
+            result['说明'] = '无主键字段或主键字段在新老表中不全存在'
+            self.compare_results['主键distinct对比'] = result
+            return result
+        old_df = self.old_df if self.old_df is not None else pd.DataFrame()
+        new_df = self.new_df if self.new_df is not None else pd.DataFrame()
+        old_distinct = old_df[pk_cols].drop_duplicates().shape[0]
+        old_total = len(old_df)
+        new_distinct = new_df[pk_cols].drop_duplicates().shape[0]
+        new_total = len(new_df)
+        distinct_ok = old_distinct == new_distinct
+        total_ok = old_total == new_total
+        result = {
+            '主键字段': pk_cols,
+            '老表distinct数': old_distinct,
+            '新表distinct数': new_distinct,
+            'distinct是否一致': distinct_ok,
+            '老表总行数': old_total,
+            '新表总行数': new_total,
+            '总行数是否一致': total_ok,
+            '是否一致': distinct_ok and total_ok
+        }
+        self.compare_results['主键distinct对比'] = result
+        return result
 
     def compare_numeric_sum(self) -> Dict[str, bool]:
         """对比数值型字段sum结果是否一致"""
@@ -696,11 +756,15 @@ class SparkTableComparator:
     def run_all_comparisons(self, group_fields: List[str] = None, sample_ratio: float = None) -> Dict:
         self.compare_results['查询SQL'] = {'老表SQL': self.old_table_sql.strip(), '新表SQL': self.new_table_sql.strip()}
         self.compare_row_count()
+        self.compare_primary_key_distinct()
         self.compare_numeric_sum()
         self.compare_group_by_dimension(group_fields)
         self.compare_detail_data(sample_ratio)
+        pk_ok = self.compare_results.get('主键distinct对比', {}).get('是否一致', True)
+        if '说明' in self.compare_results.get('主键distinct对比', {}):
+            pk_ok = True
         num_ok = all(self.compare_results['数值型字段sum对比'].get(f, {}).get('是否一致', True) is not False for f in self.numeric_fields)
-        all_consistent = all([self.compare_results['数据量对比']['是否一致'], num_ok, self.compare_results['维度分组对比'].get('是否整体一致', True), self.compare_results['全字段明细对比'].get('是否一致', True)])
+        all_consistent = all([self.compare_results['数据量对比']['是否一致'], pk_ok, num_ok, self.compare_results['维度分组对比'].get('是否整体一致', True), self.compare_results['全字段明细对比'].get('是否一致', True)])
         inconsistent_dims = []
         for k, v in self.compare_results.items():
             if k == '整体结论': continue
@@ -741,6 +805,14 @@ class SparkTableComparator:
             r = self.compare_results['数据量对比']
             print("\\n【数据量对比】")
             self._print_table(['老表数据量', '新表数据量', '是否一致'], [[r.get('老表数据量', ''), r.get('新表数据量', ''), '✅' if r.get('是否一致') else '❌']])
+        if '主键distinct对比' in self.compare_results:
+            r = self.compare_results['主键distinct对比']
+            if '说明' not in r:
+                print("\\n【主键 distinct 去重与未去重对比】")
+                self._print_table(['指标', '老表', '新表', '是否一致'], [
+                    ['distinct数', r.get('老表distinct数',''), r.get('新表distinct数',''), '✅' if r.get('distinct是否一致') else '❌'],
+                    ['总行数', r.get('老表总行数',''), r.get('新表总行数',''), '✅' if r.get('总行数是否一致') else '❌']
+                ])
         if '数值型字段sum对比' in self.compare_results:
             sr = self.compare_results['数值型字段sum对比']
             if '说明' not in sr:
@@ -855,6 +927,13 @@ class SparkTableComparator:
         if '数据量对比' in self.compare_results:
             r = self.compare_results['数据量对比']
             add_section('数据量对比', [[self._to_native(r.get('老表数据量')), self._to_native(r.get('新表数据量')), '是' if r.get('是否一致') else '否']], ['老表数据量', '新表数据量', '是否一致'])
+        if '主键distinct对比' in self.compare_results:
+            r = self.compare_results['主键distinct对比']
+            if '说明' not in r:
+                add_section('主键distinct对比', [
+                    ['distinct数', self._to_native(r.get('老表distinct数')), self._to_native(r.get('新表distinct数')), '是' if r.get('distinct是否一致') else '否'],
+                    ['总行数', self._to_native(r.get('老表总行数')), self._to_native(r.get('新表总行数')), '是' if r.get('总行数是否一致') else '否']
+                ], ['指标', '老表', '新表', '是否一致'])
         if '数值型字段sum对比' in self.compare_results:
             sr = self.compare_results['数值型字段sum对比']
             if '说明' not in sr:
@@ -929,7 +1008,8 @@ def main():
         comparator = SparkTableComparator(
             old_table_sql=OLD_TABLE_SQL,
             new_table_sql=NEW_TABLE_SQL,
-            field_info=FIELD_INFO
+            field_info=FIELD_INFO,
+            primary_key_fields=PRIMARY_KEY_FIELDS
         )
         
         # 执行所有对比（支持明细采样）
@@ -964,6 +1044,7 @@ if __name__ == "__main__":
             if(!fields.length){ showToast('请至少添加一个字段',true); return null; }
             const strFields=fields.filter(f=>['int','float','numeric'].indexOf(f.type.toLowerCase())<0).map(f=>f.name);
             const numFields=fields.filter(f=>['int','float','numeric'].indexOf(f.type.toLowerCase())>=0).map(f=>f.name);
+            const primaryKeyFields=fields.filter(f=>f.type==='str'&&f.pk).map(f=>f.name);
             const allFields=fields.map(f=>f.name);
             const oldWhereClause=oldWhere?' WHERE '+oldWhere:'';
             const newWhereClause=newWhere?' WHERE '+newWhere:'';
@@ -971,7 +1052,7 @@ if __name__ == "__main__":
             const oldSql="SELECT\n"+selectClause+"\nFROM "+oldTable+oldWhereClause;
             const newSql="SELECT\n"+selectClause+"\nFROM "+newTable+newWhereClause;
             const fieldInfoStr=fields.map(f=>"        '"+f.name+"': '"+f.type+"'").join(',\n');
-            return {oldTable,newTable,oldWhere,newWhere,fields,strFields,numFields,allFields,oldWhereClause,newWhereClause,oldSql,newSql,fieldInfoStr};
+            return {oldTable,newTable,oldWhere,newWhere,fields,strFields,numFields,primaryKeyFields,allFields,oldWhereClause,newWhereClause,oldSql,newSql,fieldInfoStr};
         }
 
         function generatePython(){
@@ -1004,10 +1085,13 @@ ${selectLines}
 ${d.fieldInfoStr}
     }
     
-    # 4. 配置分组对比的维度字段（可选，None表示用所有str维度字段）
+    # 4. 主键字段（str类型，用于 distinct 去重与未去重对比）
+    PRIMARY_KEY_FIELDS = ${JSON.stringify(d.primaryKeyFields)}
+    
+    # 5. 配置分组对比的维度字段（可选，None表示用所有str维度字段）
     GROUP_FIELDS = None  # 或指定如 ['order_create_date', 'zdm_id']，None则用全部str字段
     
-    # 5. 明细对比采样比例（数据量大时建议设置，如0.1表示10%，None表示全量）
+    # 6. 明细对比采样比例（数据量大时建议设置，如0.1表示10%，None表示全量）
     SAMPLE_RATIO = None  # 千万级以上数据建议设为0.01-0.1
     # =======================================================`;
             const code=PYTHON_TEMPLATE.replace('__CONFIG_BLOCK__', configBlock);
@@ -1036,8 +1120,25 @@ ${d.fieldInfoStr}
             if(d.newWhere) sql+='WHERE '+d.newWhere+'\n';
             sql+=';\n\n';
 
+            if(d.primaryKeyFields.length>0){
+                sql+='-- ========== 2. 主键 distinct 去重与未去重对比 ==========\n';
+                const pkExpr=d.primaryKeyFields.length===1 ? 'COUNT(DISTINCT '+d.primaryKeyFields[0]+')' : "COUNT(DISTINCT CONCAT_WS('__', "+d.primaryKeyFields.join(', ')+"))";
+                sql+='SELECT \'老表\' AS table_type,\n';
+                sql+='       '+pkExpr+' AS distinct_cnt,\n';
+                sql+='       COUNT(*) AS total_cnt\n';
+                sql+='FROM '+d.oldTable+'\n';
+                if(d.oldWhere) sql+='WHERE '+d.oldWhere+'\n';
+                sql+='\nUNION ALL\n\n';
+                sql+='SELECT \'新表\' AS table_type,\n';
+                sql+='       '+pkExpr+' AS distinct_cnt,\n';
+                sql+='       COUNT(*) AS total_cnt\n';
+                sql+='FROM '+d.newTable+'\n';
+                if(d.newWhere) sql+='WHERE '+d.newWhere+'\n';
+                sql+=';\n\n';
+            }
+
             if(d.numFields.length>0){
-                sql+='-- ========== 2. 新老表数值型字段 sum 值 ==========\n';
+                sql+='-- ========== 3. 新老表数值型字段 sum 值 ==========\n';
                 const sumCols=d.numFields.map(f=>'       SUM('+f+') AS '+f+'_sum').join(',\n');
                 sql+='SELECT \'老表\' AS table_type,\n';
                 sql+=sumCols+'\n';
@@ -1052,7 +1153,7 @@ ${d.fieldInfoStr}
             }
 
             if(d.strFields.length>0){
-                sql+='-- ========== 3. 按字符串字段 GROUP BY 汇总数值型字段 ==========\n';
+                sql+='-- ========== 4. 按字符串字段 GROUP BY 汇总数值型字段 ==========\n';
                 sql+='-- 说明：UNION ALL 类型不做空/0/null 转化，保持原始分组\n';
                 for(let i=0;i<d.strFields.length;i++){
                     const gf=d.strFields[i];
@@ -1075,7 +1176,7 @@ ${d.fieldInfoStr}
             }
 
             if(d.strFields.length>0){
-                sql+='-- ========== 4. 全字符串字段 FULL OUTER JOIN 后 sum 数值型字段 ==========\n';
+                sql+='-- ========== 5. 全字符串字段 FULL OUTER JOIN 后 sum 数值型字段 ==========\n';
                 sql+='-- 说明：str 字段的 0、空、null 统一按 \'0\' 处理后关联\n';
                 const joinCond=d.strFields.map(f=>'    '+normStr('o.'+f)+' = '+normStr('n.'+f)).join('\n    AND ');
                 const sumSelect=d.numFields.length>0
@@ -1110,7 +1211,7 @@ ${d.fieldInfoStr}
             }
 
             if(d.strFields.length>0 && d.numFields.length>0){
-                sql+='-- ========== 5. 按单个 str 字段 FULL OUTER JOIN 后数值型 sum 差异明细 ==========\n';
+                sql+='-- ========== 6. 按单个 str 字段 FULL OUTER JOIN 后数值型 sum 差异明细 ==========\n';
                 sql+='-- 输出：新老表按某 str 分组后，任一数值型字段 sum 不一致的明细行\n';
                 sql+='-- 说明：str 字段的 0、空、null 统一按 \'0\' 处理后关联；数值比较用 ROUND(ROUND(...,5),2) 先归一化再四舍五入，消除 19.814999998 与 19.815 的浮点差异\n\n';
                 for(let i=0;i<d.strFields.length;i++){
@@ -1157,5 +1258,3 @@ ${d.fieldInfoStr}
     </script>
 </body>
 </html>
-
-
