@@ -303,16 +303,12 @@
             const parsed=[];
             const validTypes=['str','int','float'];
             for(const line of lines){
-                const sepIdx=line.search(/[\t,，]/);
-                let name,type;
-                if(sepIdx>=0){
-                    name=line.substring(0,sepIdx).trim();
-                    type=(line.substring(sepIdx+1).trim().toLowerCase()||'str').replace('numeric','float').replace('string','str');
-                }else{
-                    name=line; type='str';
-                }
+                const parts=line.split(/[\t,，]/).map(s=>s.trim()).filter(Boolean);
+                if(!parts.length) continue;
+                const name=parts[0];
+                let type=(parts[1]||'str').toLowerCase().replace('numeric','float').replace('string','str');
+                const pk=parts.length>=3 && /^(1|true|pk|主键|yes)$/i.test(String(parts[2]).trim());
                 if(name && validTypes.includes(type)){
-                    const pk=parts.length>=3 && /^(1|true|pk|主键|yes)$/i.test(String(parts[2]).trim());
                     parsed.push(type==='str' ? [name,type,pk] : [name,type]);
                 }
             }
